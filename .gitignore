@@ -1,0 +1,15 @@
+# Python & Virtualenv
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Unrelated workspace binaries / slides
+*.deb
+*.pptx
+stoikovkv_master_implementation_prompts (1).md
+
+# Large generated PyTorch binary artifacts (regenerated via calibrate_model / bench_person1.py)
+*.pt
