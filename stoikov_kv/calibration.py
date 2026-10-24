@@ -755,7 +755,7 @@ def load_model_and_tokenizer(
             tokenizer.pad_token = tokenizer.eos_token
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            torch_dtype=dtype,
+            torch_dtype=torch.float32,  # Use float32 for calibration stability
             device_map=device,
             attn_implementation="eager",
             trust_remote_code=True,
@@ -1702,8 +1702,13 @@ def calibrate_model(
             .reshape(num_kv_heads, q_per_kv * n_tokens_total, head_dim)
             .to(torch.float32)
         )
-        _, _, Vh = torch.linalg.svd(q_grouped, full_matrices=False)
-        u_q_layer = Vh[:, :r_subspace, :].transpose(-1, -2).contiguous()  # [num_kv_heads, head_dim, r]
+        # Use eigendecomposition of X^T X on CPU for stability
+        xtx = torch.matmul(q_grouped.transpose(-1, -2), q_grouped)
+        xtx_cpu = xtx.cpu()
+        eig_reg = 1e-1
+        xtx_reg = xtx_cpu + eig_reg * torch.eye(head_dim, device='cpu', dtype=xtx_cpu.dtype)
+        eigvals, eigvecs = torch.linalg.eigh(xtx_reg)
+        u_q_layer = eigvecs[:, :, -r_subspace:].contiguous().to(q_grouped.device)
         U_Q[l_idx] = u_q_layer.to(model_dtype)
 
         # 3. Evaluate Write-Time Probe on Held-Out Evaluation Prompts
