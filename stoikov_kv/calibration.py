@@ -738,9 +738,9 @@ def load_model_and_tokenizer(
     seed: int = 42,
 ) -> Tuple[nn.Module, Any]:
     """
-    Loads `Qwen/Qwen2.5-1.5B-Instruct` or `Qwen/Qwen2.5-3B-Instruct` in `torch.float16` on CUDA.
-    Falls back cleanly to `FallbackQwen2ForCausalLM` if `transformers` or local HuggingFace Hub
-    weights are unavailable in an offline environment.
+    Loads `Qwen/Qwen2.5-1.5B-Instruct` or `Qwen/Qwen2.5-3B-Instruct`.
+    Uses memory-efficient loading for 6GB VRAM GPUs.
+    Falls back cleanly to `FallbackQwen2ForCausalLM` if real model unavailable.
     """
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -753,10 +753,22 @@ def load_model_and_tokenizer(
         tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
+        
+        # Use float32 for calibration stability, float16 for inference
+        model_dtype = torch.float32 if dtype == torch.float16 else dtype
+        
+        # Use low_cpu_mem_usage and device_map with max_memory for 6GB VRAM
+        # Only use device_map on CUDA; force CPU if device is CPU
+        use_cuda = torch.cuda.is_available() and not str(device).startswith("cpu")
+        device_map = "auto" if use_cuda else device
+        max_memory = {0: "5.5GB"} if use_cuda else None
+        
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            torch_dtype=torch.float32,  # Use float32 for calibration stability
-            device_map=device,
+            torch_dtype=dtype,
+            device_map=device_map,
+            max_memory=max_memory,
+            low_cpu_mem_usage=True,
             attn_implementation="eager",
             trust_remote_code=True,
         )
@@ -764,8 +776,18 @@ def load_model_and_tokenizer(
         return model, tokenizer
     except Exception as exc:
         print(
-            f"[StoikovKV] Info: Using standalone GQA Qwen2.5-1.5B architecture model "
-            f"(HF Hub offline/unavailable: {type(exc).__name__})."
+            f"[StoikovKV] Info: Real model load failed ({type(exc).__name__}), "
+            f"falling back to structured fallback model: {exc}"
+        )
+        config = FallbackQwen2Config(_name_or_path=f"{model_name} (Standalone GQA)")
+        model = FallbackQwen2ForCausalLM(config, device=device, dtype=dtype, seed=seed)
+        model.eval()
+        tokenizer = FallbackQwen2Tokenizer(vocab_size=config.vocab_size)
+        return model, tokenizer
+    except Exception as exc:
+        print(
+            f"[StoikovKV] Info: Real model load failed ({type(exc).__name__}), "
+            f"falling back to structured fallback model: {exc}"
         )
         config = FallbackQwen2Config(_name_or_path=f"{model_name} (Standalone GQA)")
         model = FallbackQwen2ForCausalLM(config, device=device, dtype=dtype, seed=seed)
