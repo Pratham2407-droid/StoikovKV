@@ -363,8 +363,8 @@ def plot_probe_correlation(
 
     p_vis = np.log1p(np.maximum(0.0, p_scores))
     g_vis = np.log1p(np.maximum(0.0, g_scores))
-    p_norm = (p_vis - p_vis.min()) / (p_vis.ptp() + 1e-8)
-    g_norm = (g_vis - g_vis.min()) / (g_vis.ptp() + 1e-8)
+    p_norm = (p_vis - p_vis.min()) / (p_vis.max() - p_vis.min() + 1e-8)
+    g_norm = (g_vis - g_vis.min()) / (g_vis.max() - g_vis.min() + 1e-8)
 
     k_top = max(1, int(round(0.20 * len(p_scores))))
     top_g_idx = set(np.argsort(g_scores)[-k_top:].tolist())
@@ -400,7 +400,7 @@ def plot_probe_correlation(
         linewidth=1.0,
     )
 
-    if len(g_norm) > 2 and g_norm.ptp() > 1e-8 and p_norm.ptp() > 1e-8:
+    if len(g_norm) > 2 and (g_norm.max() - g_norm.min()) > 1e-8 and (p_norm.max() - p_norm.min()) > 1e-8:
         m_fit, b_fit = np.polyfit(g_norm, p_norm, 1)
         xs = np.linspace(0, 1, 100)
         ax1.plot(xs, m_fit * xs + b_fit, "--", color="#f59e0b", linewidth=2.0, label="Linear Trend Fit")

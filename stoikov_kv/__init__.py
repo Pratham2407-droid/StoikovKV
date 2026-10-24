@@ -20,6 +20,17 @@ from .elastic_lexico import (
     QuantizedInt8Values,
     compute_break_even_length,
 )
+from .cache import (
+    DynamicCache,
+    StoikovKVCache,
+    HMMTopicShiftController,
+    create_mock_artifacts,
+    load_or_create_artifacts,
+)
+from .matryoshka_spec import (
+    MatryoshkaSpecResult,
+    matryoshka_speculative_generate,
+)
 
 __all__ = [
     "ROLE_RETRIEVAL_FP16",
@@ -38,4 +49,11 @@ __all__ = [
     "ElasticLexicoCodec",
     "QuantizedInt8Values",
     "compute_break_even_length",
+    "DynamicCache",
+    "StoikovKVCache",
+    "HMMTopicShiftController",
+    "create_mock_artifacts",
+    "load_or_create_artifacts",
+    "MatryoshkaSpecResult",
+    "matryoshka_speculative_generate",
 ]
