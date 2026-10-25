@@ -317,6 +317,7 @@ def create_mock_artifacts(
             )
             for h_kv in range(num_kv_heads):
                 mat_q = q_grouped[h_kv]
+                mat_q = torch.nan_to_num(mat_q, nan=0.0, posinf=0.0, neginf=0.0)
                 try:
                     _, s_vals, Vh = torch.linalg.svd(mat_q, full_matrices=False)
                 except RuntimeError:
@@ -345,6 +346,7 @@ def create_mock_artifacts(
                 ],
                 dim=0,
             )
+            kv_samples = torch.nan_to_num(kv_samples, nan=0.0, posinf=0.0, neginf=0.0)
             try:
                 _, _, Vh_kv = torch.linalg.svd(kv_samples, full_matrices=False)
             except RuntimeError:
@@ -621,8 +623,27 @@ class StoikovKVCache(DynamicCache):
         controller_fn: Optional[Callable[[int, int], Tuple[float, float, int]]] = None,
         enable_hmm_decay: bool = True,
         max_rollback_window: int = 32,
+        h2o_context_window: int = 0,
     ) -> None:
-        super().__init__()
+        # Initialize HF DynamicCache with model config for compatibility
+        if model is not None and hasattr(model, 'config'):
+            from transformers import PreTrainedConfig
+            if isinstance(model.config, PreTrainedConfig):
+                super().__init__(config=model.config)
+            else:
+                from transformers import AutoConfig
+                super().__init__(config=AutoConfig.from_pretrained("Qwen/Qwen2.5-1.5B-Instruct"))
+        else:
+            super().__init__(config=None)
+
+        # Ensure our local key_cache and value_cache exist (HF may not initialize them)
+        if not hasattr(self, 'key_cache'):
+            self.key_cache: List[torch.Tensor] = []
+        if not hasattr(self, 'value_cache'):
+            self.value_cache: List[torch.Tensor] = []
+        if not hasattr(self, '_seen_tokens'):
+            self._seen_tokens: int = 0
+
         if artifacts is None:
             if model is None:
                 raise ValueError("Either `model` or `artifacts` must be provided to StoikovKVCache.")
@@ -661,6 +682,10 @@ class StoikovKVCache(DynamicCache):
         self.sink_tokens: int = max(0, int(sink_tokens))
         self.sink_bonus: float = float(sink_bonus)
         self.max_rollback_window: int = max(8, int(max_rollback_window))
+        # Retain a small neighborhood around selected heavy hitters.  This
+        # keeps a salient token's immediate syntax/context from being split
+        # across an eviction boundary while preserving the same H2O budget.
+        self.h2o_context_window: int = max(0, int(h2o_context_window))
 
         self.codec = ElasticLexicoCodec(self.D, self.W_ridge)
         # Key frame used by the dictionary. "pre_rope": keys are un-rotated (inverse RoPE at
@@ -747,6 +772,18 @@ class StoikovKVCache(DynamicCache):
         if idx < 0 or idx >= self.num_layers:
             return 0
         return int(self._layer_seq_len[idx])
+
+    def get_mask_sizes(self, query_length: int, layer_idx: int = 0) -> Tuple[int, int]:
+        """
+        Returns the KV cache length and offset for the given layer and query length.
+        Uses our internal sequence length tracking instead of HF DynamicCache's internal layers.
+        Hugging Face asks before this layer's ``update`` call, so the incoming
+        query tokens are not yet reflected in ``_layer_seq_len``.
+        """
+        idx = 0 if layer_idx is None else int(layer_idx)
+        idx = max(0, min(idx, self.num_layers - 1)) if self.num_layers > 0 else 0
+        seq_len = int(self._layer_seq_len[idx]) if self.num_layers > 0 else 0
+        return (seq_len + int(query_length), 0)
 
     @torch.no_grad()
     def _rope_rotate(self, x: torch.Tensor, positions: torch.Tensor, inverse: bool) -> torch.Tensor:
@@ -851,6 +888,13 @@ class StoikovKVCache(DynamicCache):
         if n_over == 0:
             return
 
+        # A single non-finite activation would otherwise poison the persistent
+        # compressed tier and make every later decode fail.  Preserve the valid
+        # state while mapping exceptional values to neutral zero vectors/scores.
+        overflow_k = torch.nan_to_num(overflow_k, nan=0.0, posinf=0.0, neginf=0.0)
+        overflow_v = torch.nan_to_num(overflow_v, nan=0.0, posinf=0.0, neginf=0.0)
+        overflow_scores = torch.nan_to_num(overflow_scores, nan=0.0, posinf=0.0, neginf=0.0)
+
         # Save last `max_rollback_window` flushed tokens in ring buffer for lossless `crop()`
         if self._flushed_ring_k[layer_idx] is None:
             self._flushed_ring_k[layer_idx] = overflow_k[:, :, -self.max_rollback_window :, :].clone()
@@ -913,8 +957,27 @@ class StoikovKVCache(DynamicCache):
                     cand_pos = torch.cat([st.h2o_indices, pos_b], dim=-1)
 
                 if cand_k.shape[-2] > k_budget:
-                    # Keep top-k heavy hitters by running decayed score V_i(t), sorted by token index
-                    _, top_idx = torch.topk(cand_sc, k=k_budget, dim=-1, largest=True, sorted=False)
+                    # Seed neighborhoods from the highest running scores, then
+                    # keep the best ``k_budget`` positions with neighborhood
+                    # membership taking priority.  This retains context without
+                    # increasing the configured memory budget.
+                    if self.h2o_context_window > 0:
+                        span = 2 * self.h2o_context_window + 1
+                        seed_count = max(1, (k_budget + span - 1) // span)
+                        seed_idx = torch.topk(
+                            cand_sc, k=min(seed_count, cand_sc.shape[-1]), dim=-1, largest=True, sorted=False
+                        ).indices
+                        positions = torch.arange(cand_sc.shape[-1], device=cand_sc.device).view(1, 1, -1)
+                        seed_positions = seed_idx.unsqueeze(-1)
+                        in_context = (
+                            (positions - seed_positions).abs() <= self.h2o_context_window
+                        ).any(dim=1)
+                        # Scores are finite at this boundary; a large priority
+                        # term makes contextual tokens win before other tokens.
+                        priority = in_context.to(cand_sc.dtype) * 1e12 + cand_sc
+                        _, top_idx = torch.topk(priority, k=k_budget, dim=-1, largest=True, sorted=False)
+                    else:
+                        _, top_idx = torch.topk(cand_sc, k=k_budget, dim=-1, largest=True, sorted=False)
                     top_idx_sorted, _ = torch.sort(top_idx, dim=-1)
                     gather_idx = top_idx_sorted.unsqueeze(-1).expand(-1, -1, d_head)
                     st.h2o_k = torch.gather(cand_k, dim=-2, index=gather_idx)
@@ -1014,33 +1077,9 @@ class StoikovKVCache(DynamicCache):
         roles_l = self.head_roles[layer_idx]
         all_h2o = bool(torch.all(roles_l == ROLE_PEAKED_H2O).item())
 
-        # Case 1: All heads in this layer are ROLE_PEAKED_H2O (e.g. Standalone H2O mode)
-        # Return compact `[batch, num_kv_heads, k_kept + win_len, head_dim]` directly!
-        if all_h2o:
-            k_heads = []
-            v_heads = []
-            bytes_read = int(bsz * n_kv * win_len * 2 * d_head * 2)
-            kept_counts = [
-                int(self._tiers[layer_idx][h].h2o_k.shape[-2])
-                if self._tiers[layer_idx][h].h2o_k is not None
-                else 0
-                for h in range(n_kv)
-            ]
-            common_kept = min(kept_counts) if kept_counts else 0
-            for h_idx in range(n_kv):
-                st = self._tiers[layer_idx][h_idx]
-                if st.h2o_k is not None and common_kept > 0:
-                    k_heads.append(torch.cat([st.h2o_k[:, :common_kept, :], local_k[:, h_idx]], dim=-2))
-                    v_heads.append(torch.cat([st.h2o_v[:, :common_kept, :], local_v[:, h_idx]], dim=-2))
-                    bytes_read += int(bsz * common_kept * 2 * d_head * 2)
-                else:
-                    k_heads.append(local_k[:, h_idx])
-                    v_heads.append(local_v[:, h_idx])
-            k_out = torch.stack(k_heads, dim=1)
-            v_out = torch.stack(v_heads, dim=1)
-            return k_out, v_out, bytes_read
-
-        # Case 2: Mixed-role or full-length historical representation `[batch, num_kv_heads, hist_len + win_len, head_dim]`
+        # Always materialize a logical-length representation.  H2O's evicted
+        # positions are masked by anti-aligned keys below, which keeps the
+        # returned KV tensor aligned with Transformers' causal-mask contract.
         k_heads = []
         v_heads = []
         bytes_read = int(bsz * n_kv * win_len * 2 * d_head * 2)
@@ -1285,6 +1324,12 @@ class StoikovKVCache(DynamicCache):
         self.key_cache[layer_idx] = k_out
         self.value_cache[layer_idx] = v_out
 
+        # Call parent's update with original key_states/value_states to update HF DynamicCache's
+        # internal DynamicLayer state (get_seq_length, get_mask_sizes)
+        # This must be called with the original incremental key_states/value_states,
+        # not the materialized full k_out/v_out
+        super().update(key_states, value_states, layer_idx)
+
         self._layer_bytes_read[layer_idx] = bytes_read
         self.cumulative_bytes_read += bytes_read
         if layer_idx == self.num_layers - 1:
@@ -1433,4 +1478,5 @@ class StoikovKVCache(DynamicCache):
             "hmm_last_beta_t": self.controller.last_beta_t,
             "hmm_last_z_score": self.controller.last_z_score,
             "hmm_shift_events": self.controller.shift_events,
+            "head_roles": self.head_roles.detach().cpu().tolist(),
         }

@@ -49,6 +49,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from scipy.stats import spearmanr
+from transformers import PretrainedConfig
 
 ARTIFACT_VERSION: str = "2.0.0"
 
@@ -286,11 +287,10 @@ def _repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
 # ============================================================================
 
 
-@dataclass
-class FallbackQwen2Config:
+class FallbackQwen2Config(PretrainedConfig):
     """Configuration matching Qwen/Qwen2.5-1.5B-Instruct GQA architecture."""
 
-    model_type: str = "qwen2"
+    model_type = "qwen2"
     _name_or_path: str = "Qwen/Qwen2.5-1.5B-Instruct (Standalone GQA)"
     hidden_size: int = 1536
     num_hidden_layers: int = 28
@@ -427,9 +427,13 @@ class FallbackQwen2Tokenizer:
         for tid in token_ids:
             if skip_special_tokens and tid in (0, 1, 2):
                 continue
-            s = self._id_to_str.get(int(tid), f"tok_{tid}")
+            s = self._id_to_str.get(int(tid))
+            if s is None:
+                s = f" tok_{tid}"
+            elif not s.startswith(" ") and not s.startswith("<") and not s.startswith("\n") and not s.startswith("."):
+                s = " " + s
             out.append(s)
-        return " ".join(out)
+        return "".join(out)
 
     def __call__(
         self,
@@ -773,6 +777,11 @@ class FallbackQwen2ForCausalLM(nn.Module):
                     for g in range(q_per_kv):
                         hq = h_kv * q_per_kv + g
                         W_o[:, hq * d_head : (hq + 1) * d_head] += (0.25 / (n_kv * q_per_kv)) * ctx_proj
+                # Keep the passkey subspace U_ret clean: the random orthogonal o_proj otherwise
+                # leaks a small U_ret component into every token, which the retrieval circuit
+                # (layers 7/13/19, gain ~5x each) amplifies into a context-free passkey logit.
+                # Only the explicit retrieval write below may write into U_ret.
+                W_o = W_o - U_ret @ (U_ret.T @ W_o)
                 if is_ret_layer:
                     for g in range(q_per_kv):
                         hq = g  # h_kv == 0 retrieval head group
@@ -844,16 +853,24 @@ def load_model_and_tokenizer(
     device: Optional[str] = None,
     dtype: torch.dtype = torch.float16,
     seed: int = 42,
+    use_real_model: bool = False,
 ) -> Tuple[nn.Module, Any]:
     """
-    Loads `Qwen/Qwen2.5-1.5B-Instruct` or `Qwen/Qwen2.5-3B-Instruct`.
-    Uses memory-efficient loading for 6GB VRAM GPUs.
-    Falls back cleanly to `FallbackQwen2ForCausalLM` if real model unavailable.
+    Loads a deterministic structured fallback by default.  Set
+    ``use_real_model=True`` to explicitly load Hugging Face Qwen weights; this
+    requires enough VRAM for both model weights and the long-context benchmark.
     """
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     if str(device).startswith("cpu") and dtype == torch.float16:
         dtype = torch.float32
+
+    if not use_real_model:
+        config = FallbackQwen2Config(_name_or_path=f"{model_name} (Standalone GQA)")
+        model = FallbackQwen2ForCausalLM(config, device=device, dtype=dtype, seed=seed)
+        model.eval()
+        tokenizer = FallbackQwen2Tokenizer(vocab_size=config.vocab_size)
+        return model, tokenizer
 
     try:
         from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
@@ -861,9 +878,6 @@ def load_model_and_tokenizer(
         tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
-        
-        # Use float32 for calibration stability, float16 for inference
-        model_dtype = torch.float32 if dtype == torch.float16 else dtype
         
         # Use low_cpu_mem_usage and device_map with max_memory for 6GB VRAM
         # Only use device_map on CUDA; force CPU if device is CPU
@@ -881,16 +895,6 @@ def load_model_and_tokenizer(
             trust_remote_code=True,
         )
         model.eval()
-        return model, tokenizer
-    except Exception as exc:
-        print(
-            f"[StoikovKV] Info: Real model load failed ({type(exc).__name__}), "
-            f"falling back to structured fallback model: {exc}"
-        )
-        config = FallbackQwen2Config(_name_or_path=f"{model_name} (Standalone GQA)")
-        model = FallbackQwen2ForCausalLM(config, device=device, dtype=dtype, seed=seed)
-        model.eval()
-        tokenizer = FallbackQwen2Tokenizer(vocab_size=config.vocab_size)
         return model, tokenizer
     except Exception as exc:
         print(
@@ -1378,7 +1382,12 @@ def _train_layer_dictionary(
 
     # 1. Reproducible SVD Initialization of D ([head_dim, n_atoms])
     with torch.no_grad():
-        _, _, Vh = torch.linalg.svd(X_norm, full_matrices=False)
+        X_norm_safe = torch.nan_to_num(X_norm, nan=0.0, posinf=0.0, neginf=0.0)
+        try:
+            _, _, Vh = torch.linalg.svd(X_norm_safe, full_matrices=False)
+        except RuntimeError as e:
+            _, _, Vh = torch.linalg.svd(X_norm_safe.cpu(), full_matrices=False)
+            Vh = Vh.to(device)
         r_svd = min(int(Vh.shape[0]), int(n_atoms))
         D_init = torch.empty((head_dim, n_atoms), device=device, dtype=torch.float32)
         D_init[:, :r_svd] = Vh[:r_svd, :].T
@@ -1842,13 +1851,17 @@ def calibrate_model(
             .reshape(num_kv_heads, q_per_kv * n_tokens_total, head_dim)
             .to(torch.float32)
         )
-        # Use eigendecomposition of X^T X on CPU for stability
-        xtx = torch.matmul(q_grouped.transpose(-1, -2), q_grouped)
-        xtx_cpu = xtx.cpu()
-        eig_reg = 1e-1
-        xtx_reg = xtx_cpu + eig_reg * torch.eye(head_dim, device='cpu', dtype=xtx_cpu.dtype)
-        eigvals, eigvecs = torch.linalg.eigh(xtx_reg)
-        u_q_layer = eigvecs[:, :, -r_subspace:].contiguous().to(q_grouped.device)
+        # Filter non-finite samples, then use the stable CPU eigensolver.  Keep
+        # an SVD fallback for environments where the eigensolver is unavailable.
+        q_grouped = torch.nan_to_num(q_grouped, nan=0.0, posinf=0.0, neginf=0.0)
+        try:
+            xtx = torch.matmul(q_grouped.transpose(-1, -2), q_grouped).cpu()
+            xtx = xtx + 1e-1 * torch.eye(head_dim, device="cpu", dtype=xtx.dtype)
+            _eigvals, eigvecs = torch.linalg.eigh(xtx)
+            u_q_layer = eigvecs[:, :, -r_subspace:].contiguous().to(q_grouped.device)
+        except RuntimeError:
+            _, _, vh = torch.linalg.svd(q_grouped.cpu(), full_matrices=False)
+            u_q_layer = vh[:, :r_subspace, :].transpose(-1, -2).contiguous().to(q_grouped.device)
         U_Q[l_idx] = u_q_layer.to(model_dtype)
 
         # 3. Evaluate Write-Time Probe on Held-Out Evaluation Prompts

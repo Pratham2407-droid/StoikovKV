@@ -1,0 +1,19 @@
+cache:
+  n_b: 128
+  keep_ratio: 0.10
+  s_budget: 16
+  policy_mode: "hybrid"
+  enable_hmm_decay: true
+  shift_z_threshold: 1.4
+  beta_stationary: 0.99
+  beta_shift: 0.65
+  ema_alpha: 0.15
+  max_rollback_window: 64
+  sink_tokens: 4
+  sink_bonus: 100.0
+  lambda1: 0.04
+  # Long context settings (for real model)
+  max_seq_len: 32768
+  dict_atoms: 1024
+  dict_steps: 60
+  training_samples: 4096

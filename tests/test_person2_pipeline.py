@@ -146,6 +146,29 @@ class TestPerson2LiveInference(unittest.TestCase):
         self.assertGreater(res["kv_bytes_read_per_token"], 0.0)
         self.assertEqual(cache.get_seq_length(0), 36 + 12)
 
+    def test_05_h2o_context_window_and_legacy_rope_frame(self) -> None:
+        """H2O accepts contextual retention and legacy post-RoPE artifacts stay unrotated."""
+        artifacts = dict(self.artifacts)
+        artifacts["dict_key_frame"] = "post_rope"
+        cache = StoikovKVCache(
+            model=self.model,
+            artifacts=artifacts,
+            n_b=2,
+            keep_ratio=0.25,
+            policy_mode="standalone_h2o",
+            h2o_context_window=1,
+        )
+        states = torch.randn(1, 2, 3, 16, device=self.device, dtype=self.dtype)
+        self.assertTrue(
+            torch.equal(cache._rope_rotate(states, torch.arange(3, device=self.device), inverse=True), states)
+        )
+
+        input_ids = torch.randint(4, 250, (1, 24), device=self.device)
+        _ = self.model(input_ids=input_ids, past_key_values=cache, use_cache=True, output_attentions=False)
+        for tier in cache._tiers[0]:
+            self.assertIsNotNone(tier.h2o_indices)
+            self.assertLessEqual(int(tier.h2o_k.shape[-2]), max(1, int(24 * 0.25)))
+
 
 if __name__ == "__main__":
     unittest.main()

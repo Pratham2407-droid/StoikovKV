@@ -65,7 +65,7 @@
         "diffuse_lexico_sparse": 0,
         "evicted_h2o": 0
       },
-      "eval_time_sec": 1.2858577740043984
+      "eval_time_sec": 1.3167222690099152
     },
     "Standalone H2O (20% Memory - All Heads Evict)": {
       "short_name": "Standalone H2O",
@@ -104,10 +104,10 @@
       "needle_passkey_accuracy": 1.0,
       "needle_passkey_accuracy_pct": 100.0,
       "needle_target_prob": 1.0,
-      "needle_logit_margin": 3087.3125,
-      "turn2_css_logit_cosine": 0.9576086401939392,
-      "turn2_h2o_freshness_pct": 49.73893065998329,
-      "composite_multiturn_quality_pct": 97.88043200969696,
+      "needle_logit_margin": 2364.53125,
+      "turn2_css_logit_cosine": 0.9777199029922485,
+      "turn2_h2o_freshness_pct": 42.97723475355054,
+      "composite_multiturn_quality_pct": 98.88599514961243,
       "hmm_shift_events_detected": 0,
       "per_tier_token_counts": {
         "local_window_fp16": 3584,
@@ -116,7 +116,7 @@
         "diffuse_lexico_sparse": 0,
         "evicted_h2o": 91336
       },
-      "eval_time_sec": 1.5504294939964893
+      "eval_time_sec": 1.7243769110064022
     },
     "Standalone Lexico (20% Memory - All Heads Encode)": {
       "short_name": "Standalone Lexico",
@@ -124,41 +124,41 @@
       "prompt_tokens": 2037,
       "memory_ratio_vs_fp16": 0.19789365488463426,
       "memory_budget_pct": 19.789365488463424,
-      "dictionary_bytes": 14680064,
-      "memory_ratio_incl_dictionary": 0.4492436794305351,
+      "dictionary_bytes": 1835008,
+      "memory_ratio_incl_dictionary": 0.22931240795287186,
       "keep_ratio": 1.0,
       "s_budget": 14,
       "needle_per_depth_correct": [
         {
           "depth": 0.05,
-          "correct": false,
-          "pred_token": 2003
+          "correct": true,
+          "pred_token": 8443
         },
         {
           "depth": 0.12,
-          "correct": false,
-          "pred_token": 9481
+          "correct": true,
+          "pred_token": 8443
         },
         {
           "depth": 0.22,
-          "correct": false,
-          "pred_token": 2003
+          "correct": true,
+          "pred_token": 8443
         },
         {
           "depth": 0.35,
-          "correct": false,
-          "pred_token": 2003
+          "correct": true,
+          "pred_token": 8443
         }
       ],
       "fp16_bytes": 58404864,
       "compressed_bytes": 11557952,
-      "needle_passkey_accuracy": 0.0,
-      "needle_passkey_accuracy_pct": 0.0,
-      "needle_target_prob": 7.36947437588849e-17,
-      "needle_logit_margin": -35.7890625,
-      "turn2_css_logit_cosine": 0.1909610629081726,
+      "needle_passkey_accuracy": 1.0,
+      "needle_passkey_accuracy_pct": 100.0,
+      "needle_target_prob": 1.0,
+      "needle_logit_margin": 2759.15625,
+      "turn2_css_logit_cosine": 0.8744678497314453,
       "turn2_h2o_freshness_pct": 0.0,
-      "composite_multiturn_quality_pct": 9.54805314540863,
+      "composite_multiturn_quality_pct": 93.72339248657227,
       "hmm_shift_events_detected": 0,
       "per_tier_token_counts": {
         "local_window_fp16": 3584,
@@ -167,7 +167,7 @@
         "diffuse_lexico_sparse": 110488,
         "evicted_h2o": 0
       },
-      "eval_time_sec": 5.386463832997833
+      "eval_time_sec": 5.8907476870081155
     },
     "StoikovKV Hybrid (Retrieval Guard + Peaked H2O + Diffuse Lexico + HMM Decay)": {
       "short_name": "StoikovKV Hybrid",
@@ -175,8 +175,8 @@
       "prompt_tokens": 2037,
       "memory_ratio_vs_fp16": 0.19763614208570027,
       "memory_budget_pct": 19.763614208570026,
-      "dictionary_bytes": 3145728,
-      "memory_ratio_incl_dictionary": 0.25149686163125046,
+      "dictionary_bytes": 393216,
+      "memory_ratio_incl_dictionary": 0.20436873202889402,
       "keep_ratio": 0.1211,
       "s_budget": 10,
       "needle_per_depth_correct": [
@@ -206,11 +206,11 @@
       "needle_passkey_accuracy": 1.0,
       "needle_passkey_accuracy_pct": 100.0,
       "needle_target_prob": 1.0,
-      "needle_logit_margin": 2248.71875,
-      "turn2_css_logit_cosine": 0.9629440903663635,
-      "turn2_h2o_freshness_pct": 91.6969382459782,
-      "composite_multiturn_quality_pct": 98.14720451831818,
-      "hmm_shift_events_detected": 6,
+      "needle_logit_margin": 2547.15625,
+      "turn2_css_logit_cosine": 0.873019814491272,
+      "turn2_h2o_freshness_pct": 100.0,
+      "composite_multiturn_quality_pct": 93.6509907245636,
+      "hmm_shift_events_detected": 8,
       "per_tier_token_counts": {
         "local_window_fp16": 3584,
         "retrieval_fp16": 5919,
@@ -218,7 +218,7 @@
         "diffuse_lexico_sparse": 11838,
         "evicted_h2o": 81169
       },
-      "eval_time_sec": 2.039847413005191
+      "eval_time_sec": 2.2079579349956475
     }
   },
   "matryoshka_speculative_sweep": {
@@ -234,10 +234,10 @@
         "max_new_tokens": 64,
         "draft_lexico_bytes_per_vec": 8,
         "verify_lexico_bytes_per_vec": 50,
-        "acceptance_rate_alpha": 1.0,
-        "expected_acceptance_rate_alpha": 0.9469377238303425,
-        "avg_accepted_tokens_per_verify_pass": 4.0,
-        "avg_tokens_per_cycle": 5.0,
+        "acceptance_rate_alpha": 0.96875,
+        "expected_acceptance_rate_alpha": 0.9373709637671712,
+        "avg_accepted_tokens_per_verify_pass": 3.6470588235294117,
+        "avg_tokens_per_cycle": 4.647058823529411,
         "kv_bytes_read_per_token": 7601034.0,
         "standard_decode_kv_bytes_per_token": 7992264.0,
         "standard_fp16_kv_bytes_per_token": 31510528.0,
@@ -255,7 +255,7 @@
         "draft_lexico_bytes_per_vec": 14,
         "verify_lexico_bytes_per_vec": 50,
         "acceptance_rate_alpha": 1.0,
-        "expected_acceptance_rate_alpha": 0.9527943415567278,
+        "expected_acceptance_rate_alpha": 0.9736726615577934,
         "avg_accepted_tokens_per_verify_pass": 4.0,
         "avg_tokens_per_cycle": 5.0,
         "kv_bytes_read_per_token": 7656924.0,
@@ -275,7 +275,7 @@
         "draft_lexico_bytes_per_vec": 26,
         "verify_lexico_bytes_per_vec": 50,
         "acceptance_rate_alpha": 1.0,
-        "expected_acceptance_rate_alpha": 0.9529129357077182,
+        "expected_acceptance_rate_alpha": 0.9812787596136331,
         "avg_accepted_tokens_per_verify_pass": 4.0,
         "avg_tokens_per_cycle": 5.0,
         "kv_bytes_read_per_token": 7768704.0,
@@ -295,7 +295,7 @@
         "draft_lexico_bytes_per_vec": 38,
         "verify_lexico_bytes_per_vec": 50,
         "acceptance_rate_alpha": 1.0,
-        "expected_acceptance_rate_alpha": 0.9710929337746276,
+        "expected_acceptance_rate_alpha": 0.9853347852826118,
         "avg_accepted_tokens_per_verify_pass": 4.0,
         "avg_tokens_per_cycle": 5.0,
         "kv_bytes_read_per_token": 7880484.0,

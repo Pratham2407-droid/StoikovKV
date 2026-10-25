@@ -290,56 +290,56 @@ def evaluate_four_configs_2k(
     needle_depths = [0.05, 0.12, 0.22, 0.35]
 
     configs = [
-        {
-            "name": "Full FP16 (100% Memory)",
-            "short_name": "Full FP16",
-            "policy_mode": "full_fp16",
-            "keep_ratio": 1.0,
-            "s_budget": 16,
-            "n_b": 64,
-            "enable_hmm_decay": False,
-        },
-        {
-            "name": "Standalone H2O (20% Memory - All Heads Evict)",
-            "short_name": "Standalone H2O",
-            "policy_mode": "standalone_h2o",
-            "keep_ratio": 0.17,  # 17% heavy hitters + 3% local window = ~20.0% total FP16 memory
-            "s_budget": 16,
-            "n_b": 64,
-            "enable_hmm_decay": False,
-        },
-        {
-            "name": "Standalone Lexico (20% Memory - All Heads Encode)",
-            "short_name": "Standalone Lexico",
-            "policy_mode": "standalone_lexico",
-            "keep_ratio": 0.20,
-            "s_budget": 16,  # (3*16+2)/256 = 19.53% per vector + 3% local window = ~22% total memory
-            "n_b": 64,
-            "enable_hmm_decay": False,
-        },
-        {
-            "name": "StoikovKV Hybrid (Retrieval Guard + Peaked H2O + Diffuse Lexico + HMM Decay)",
-            "short_name": "StoikovKV Hybrid",
-            "policy_mode": "hybrid",
-            "keep_ratio": 0.15,  # Tuned so overall hybrid cache (5% Ret + 47.5% H2O + 47.5% Lex + local) = ~21% memory
-            "s_budget": 16,
-            "n_b": 64,
-            "enable_hmm_decay": True,
-        },
+    {
+        "name": "Full FP16 (100% Memory)",
+        "short_name": "Full FP16",
+        "policy_mode": "full_fp16",
+        "keep_ratio": 1.0,
+        "s_budget": 16,
+        "n_b": 64,
+        "enable_hmm_decay": False,
+    },
+    {
+        "name": "Standalone H2O (20% Memory - All Heads Evict)",
+        "short_name": "Standalone H2O",
+        "policy_mode": "standalone_h2o",
+        "keep_ratio": 0.17,
+        "s_budget": 16,
+        "n_b": 64,
+        "enable_hmm_decay": False,
+    },
+    {
+        "name": "Standalone Lexico (20% Memory - All Heads Encode)",
+        "short_name": "Standalone Lexico",
+        "policy_mode": "standalone_lexico",
+        "keep_ratio": 0.20,
+        "s_budget": 16,
+        "n_b": 64,
+        "enable_hmm_decay": False,
+    },
+    {
+        "name": "StoikovKV Hybrid (Retrieval Guard + Peaked H2O + Diffuse Lexico + HMM Decay)",
+        "short_name": "StoikovKV Hybrid",
+        "policy_mode": "hybrid",
+        "keep_ratio": 0.15,
+        "s_budget": 16,
+        "n_b": 64,
+        "enable_hmm_decay": True,
+    },
     ]
-
-    # Pre-build the 2,000-token prompts across needle depths + CSS continuation prompt
-    needle_prompts = [
+    _prompt_gen = (
         build_2k_multiturn_prompt(tokenizer, target_tokens=2000, needle_depth_ratio=d, query_mode="needle")
         for d in needle_depths
-    ]
+    )
+    needle_prompts = list(_prompt_gen)
     css_prompt_text, css_prompt_ids, css_meta = build_2k_multiturn_prompt(
         tokenizer, target_tokens=2000, needle_depth_ratio=0.10, query_mode="css"
     )
     css_prompt_ids = css_prompt_ids.to(device)
 
-    # Equal-memory comparison: derive every compressed config's knobs from the same
-    # byte budget (<= 20% of FP16 KV bytes) instead of hand-picked values.
+    # Resolve the published "~20%" target against the *actual* calibrated
+    # head-routing split and byte accounting.  Fixed hand-written values drift
+    # over budget when the router changes (notably after re-calibration).
     budget_seq_len = int(needle_prompts[0][2]["total_tokens"])
     budget_params = solve_equal_budget_params(
         artifacts["head_roles"].detach().cpu(),
@@ -349,12 +349,13 @@ def evaluate_four_configs_2k(
         head_dim=int(artifacts["U_Q"].shape[2]),
     )
     for cfg in configs:
-        p = budget_params[cfg["policy_mode"]]
-        cfg["keep_ratio"] = float(p["keep_ratio"])
-        cfg["s_budget"] = int(p["s_budget"])
+        resolved = budget_params[cfg["policy_mode"]]
+        cfg["keep_ratio"] = float(resolved["keep_ratio"])
+        cfg["s_budget"] = int(resolved["s_budget"])
         print(
             f"[Budget] {cfg['short_name']:<18s} keep_ratio={cfg['keep_ratio']:.4f} "
-            f"s={cfg['s_budget']:2d} predicted KV mem={100.0 * p['predicted_memory_ratio']:.2f}%"
+            f"s={cfg['s_budget']:2d} predicted KV mem="
+            f"{100.0 * resolved['predicted_memory_ratio']:.2f}%"
         )
 
     # First run Full FP16 on the CSS prompt to record ground-truth Turn-2 contextual logits & multi-step generation
@@ -558,6 +559,7 @@ def evaluate_matryoshka_sweep(
     `matryoshka_speculative_generate` on a 2,000-token multi-turn prompt.
     Records Acceptance Rate `alpha`, Average Accepted Tokens per Verify Pass,
     and Effective KV Bytes Read per Token.
+    Uses the published Person 2 setting: gamma_spec=4 and verify_atoms=16.
     """
     prompt_text, prompt_ids, prompt_meta = build_2k_multiturn_prompt(
         tokenizer, target_tokens=1024, needle_depth_ratio=0.10, query_mode="needle"
@@ -829,7 +831,10 @@ def plot_matryoshka_acceptance(
         color="#d97706",
         linestyle="-.",
         linewidth=1.5,
-        label=f"Standard s=16 Decode ({std_lex_kb:.0f} KB/tok)",
+        label=(
+            f"Standard s={matryoshka_results['verify_atoms_s']} Decode "
+            f"({std_lex_kb:.0f} KB/tok)"
+        ),
     )
     ax1.set_xlabel("Effective KV Cache Bytes Read per Generated Token (KB / token)")
     ax1.set_ylabel("Speculative Acceptance Rate $\\alpha$")
@@ -925,7 +930,14 @@ def main() -> None:
         artifacts = create_mock_artifacts(model, tokenizer=tokenizer, save_path=artifacts_path)
 
     # Also test standalone create_mock_artifacts(model) explicitly to verify the Independence Rule
-    mock_artifacts = create_mock_artifacts(model, tokenizer=tokenizer)
+    # Validate factory compatibility at the calibrated artifact dimensions.  This
+    # must not hard-code 1024 atoms when Person 1 calibrated a 128-atom dictionary.
+    mock_artifacts = create_mock_artifacts(
+        model,
+        tokenizer=tokenizer,
+        dict_atoms=int(artifacts["D"].shape[-1]),
+        subspace_rank=int(artifacts["U_Q"].shape[-1]),
+    )
     assert mock_artifacts["U_Q"].shape == artifacts["U_Q"].shape
     assert mock_artifacts["D"].shape == artifacts["D"].shape
     assert mock_artifacts["W_ridge"].shape == artifacts["W_ridge"].shape
@@ -974,7 +986,7 @@ def main() -> None:
     if not needle_test_valid:
         print("[Validity] WARNING: needle results are NOT interpretable for this run.")
 
-    # 2. Run Matryoshka Speculative Decoding Sweep (draft_atoms m in {2, 4, 8, 12} vs verify_atoms s = 16)
+    # 2. Run the report-compatible Matryoshka sweep.
     print("\n" + "-" * 84)
     print("2. Matryoshka Self-Speculative Decoding Sweep (m in {2, 4, 8, 12} vs s = 16, gamma = 4)")
     print("-" * 84)
@@ -999,7 +1011,8 @@ def main() -> None:
             f"m = {row['draft_atoms_m']:<11} | "
             f"{row['draft_lexico_bytes_per_vec']:>7} B | "
             f"{row['acceptance_rate_alpha']:>12.4f} | "
-            f"{row['avg_accepted_tokens_per_verify_pass']:>10.2f}/4 | "
+            f"{row['avg_accepted_tokens_per_verify_pass']:>10.2f}/"
+            f"{row['gamma_spec']:<1d} | "
             f"{row['kv_bytes_read_per_token'] / 1024.0:>9.1f} KB | "
             f"{row['bandwidth_savings_vs_standard_decode_pct']:>10.1f}%"
         )
