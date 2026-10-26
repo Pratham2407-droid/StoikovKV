@@ -1,0 +1,133 @@
+{
+  "model": "Qwen/Qwen2.5-7B-Instruct",
+  "quantization": "4-bit NF4",
+  "device": "cuda",
+  "dtype": "torch.float16",
+  "torch_version": "2.14.1+cu130",
+  "cuda_version": "13.0",
+  "gpu_name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "model_device_info": {
+    "parameter_devices": {
+      "cuda:0": 204529664
+    },
+    "all_on_gpu": true
+  },
+  "results": {
+    "short_instruction": {
+      "prompt_len": 15,
+      "generated_text": " tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478",
+      "prefill_latency_ms": {
+        "mean": 14.584637000249737,
+        "median": 14.672371000415296,
+        "min": 14.295842999672459,
+        "max": 14.785697000661457
+      },
+      "decode_latency_ms": {
+        "mean": 1748.733310332985,
+        "median": 1735.9700159995555,
+        "min": 1725.4226799996104,
+        "max": 1784.8072349997892
+      },
+      "decode_latency_per_token_ms": {
+        "mean": 13.661978986976445,
+        "median": 13.562265749996527
+      },
+      "total_latency_ms": {
+        "mean": 1763.3883109998958,
+        "median": 1750.700315999893
+      },
+      "tokens_per_second": 73.19583794948521,
+      "peak_memory_gb": {
+        "mean": 0.41943074133333336,
+        "max": 0.419600896
+      }
+    },
+    "medium_context": {
+      "prompt_len": 38,
+      "generated_text": " tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478",
+      "prefill_latency_ms": {
+        "mean": 14.635116999973738,
+        "median": 14.638560000094003,
+        "min": 14.545285000167496,
+        "max": 14.721505999659712
+      },
+      "decode_latency_ms": {
+        "mean": 3460.6344363331423,
+        "median": 3435.5601879997266,
+        "min": 3432.9773419995036,
+        "max": 3513.365779000196
+      },
+      "decode_latency_per_token_ms": {
+        "mean": 13.518103266926337,
+        "median": 13.420156984373932
+      },
+      "total_latency_ms": {
+        "mean": 3475.3286616666323,
+        "median": 3450.2537529997426
+      },
+      "tokens_per_second": 73.97487504379554,
+      "peak_memory_gb": {
+        "mean": 0.42209075199999996,
+        "max": 0.422497792
+      }
+    },
+    "long_context_retrieval": {
+      "prompt_len": 1627,
+      "generated_text": " 94812 94812 94812 94812 94812 94812 94812 94812 94812 94812 94812 94812 94812 94812 94812 94812",
+      "prefill_latency_ms": {
+        "mean": 47.14484000032826,
+        "median": 47.43549000068015,
+        "min": 45.47295100019255,
+        "max": 48.52607900011208
+      },
+      "decode_latency_ms": {
+        "mean": 284.065028333013,
+        "median": 283.6926169993603,
+        "min": 279.41624499999307,
+        "max": 289.08622299968556
+      },
+      "decode_latency_per_token_ms": {
+        "mean": 17.754064270813313,
+        "median": 17.73078856246002
+      },
+      "total_latency_ms": {
+        "mean": 331.30908633332484,
+        "median": 331.23552899996866
+      },
+      "tokens_per_second": 56.325131234539015,
+      "peak_memory_gb": {
+        "mean": 0.5320958293333332,
+        "max": 0.547689472
+      }
+    },
+    "multi_turn": {
+      "prompt_len": 59,
+      "generated_text": " tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478 tok_5478",
+      "prefill_latency_ms": {
+        "mean": 17.603577667008114,
+        "median": 17.326177000541065,
+        "min": 17.305217000284756,
+        "max": 18.179339000198524
+      },
+      "decode_latency_ms": {
+        "mean": 1156.1909693333898,
+        "median": 1150.7150240004194,
+        "min": 1145.8416929999657,
+        "max": 1172.0161909997842
+      },
+      "decode_latency_per_token_ms": {
+        "mean": 18.065483895834216,
+        "median": 17.979922250006553
+      },
+      "total_latency_ms": {
+        "mean": 1173.8791356665388,
+        "median": 1168.1230589992992
+      },
+      "tokens_per_second": 55.35417737858622,
+      "peak_memory_gb": {
+        "mean": 0.42453504000000003,
+        "max": 0.425142784
+      }
+    }
+  }
+}

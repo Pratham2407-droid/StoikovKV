@@ -1,0 +1,4149 @@
+{
+  "model": "Qwen/Qwen2.5-7B-Instruct (REAL 28L, 4 KV heads, h=128)",
+  "quantization": "FP16 (CPU offload)",
+  "device": "cuda",
+  "policy_evaluation": {
+    "needle_retrieval_early": {
+      "full_fp16": {
+        "policy": "full_fp16",
+        "prompt_tokens": 472,
+        "generated_tokens": 16,
+        "generated_text": "!94812. \n\n**Note!** The!!!",
+        "generation_time_s": 19.78251303899924,
+        "tokens_per_second": 0.808795119632051,
+        "peak_memory_gb": 6.938706944,
+        "seq_length": 488,
+        "policy_mode": "full_fp16",
+        "active_atoms": 16,
+        "s_budget": 16,
+        "keep_ratio": 0.2,
+        "n_b": 128,
+        "fp16_bytes": 27983872,
+        "compressed_bytes": 27983872,
+        "memory_ratio_vs_fp16": 1.0,
+        "memory_savings_pct": 0.0,
+        "dictionary_bytes": 0,
+        "memory_ratio_incl_dictionary": 1.0,
+        "bytes_read_last_step": 27983872,
+        "cumulative_bytes_read": 511967232,
+        "per_tier_token_counts": {
+          "local_window_fp16": 14336,
+          "retrieval_fp16": 40320,
+          "peaked_h2o_fp16": 0,
+          "diffuse_lexico_sparse": 0,
+          "evicted_h2o": 0
+        },
+        "hmm_last_beta_t": 1.0,
+        "hmm_last_z_score": 0.0,
+        "hmm_shift_events": 0,
+        "head_roles": [
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ]
+        ],
+        "target": "94812",
+        "target_token_id": 17,
+        "predicted_token_id": 61503,
+        "retrieval_top1": false,
+        "target_probability": 0.0003465597692411393,
+        "target_rank": 83
+      },
+      "hybrid": {
+        "policy": "hybrid",
+        "prompt_tokens": 472,
+        "generated_tokens": 16,
+        "generated_text": "! It!castle (Pickle-Axe) eadilhA.",
+        "generation_time_s": 20.72116971000105,
+        "tokens_per_second": 0.7721571814682652,
+        "peak_memory_gb": 6.924045824,
+        "seq_length": 488,
+        "policy_mode": "hybrid",
+        "active_atoms": 16,
+        "s_budget": 16,
+        "keep_ratio": 0.1,
+        "n_b": 128,
+        "fp16_bytes": 27983872,
+        "compressed_bytes": 11176672,
+        "memory_ratio_vs_fp16": 0.39939690976288056,
+        "memory_savings_pct": 60.060309023711945,
+        "dictionary_bytes": 196608,
+        "memory_ratio_incl_dictionary": 0.40642267088700235,
+        "bytes_read_last_step": 11176672,
+        "cumulative_bytes_read": 215733376,
+        "per_tier_token_counts": {
+          "local_window_fp16": 14336,
+          "retrieval_fp16": 2160,
+          "peaked_h2o_fp16": 4560,
+          "diffuse_lexico_sparse": 3960,
+          "evicted_h2o": 29640
+        },
+        "hmm_last_beta_t": 0.99,
+        "hmm_last_z_score": 0.31186956136394467,
+        "hmm_shift_events": 0,
+        "head_roles": [
+          [
+            1,
+            1,
+            0,
+            2
+          ],
+          [
+            1,
+            2,
+            2,
+            2
+          ],
+          [
+            1,
+            1,
+            1,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            0,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            0,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            0,
+            1,
+            1
+          ],
+          [
+            0,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            2,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            2,
+            1,
+            1
+          ],
+          [
+            1,
+            0,
+            1,
+            1
+          ]
+        ],
+        "target": "94812",
+        "target_token_id": 17,
+        "predicted_token_id": 4710,
+        "retrieval_top1": false,
+        "target_probability": 0.00014542214921675622,
+        "target_rank": 564
+      },
+      "standalone_h2o": {
+        "policy": "standalone_h2o",
+        "prompt_tokens": 472,
+        "generated_tokens": 16,
+        "generated_text": "(Collectionsilmingtonerinengeance\u043a\u043e\u043b\u043e\u043f\u0441e\u660f\u8679\u6865},'\u4f20\u51fa\u7528.EndsWith\u519c\u4f5c\u7269_",
+        "generation_time_s": 19.963000395999188,
+        "tokens_per_second": 0.80148272717595,
+        "peak_memory_gb": 6.920930304,
+        "seq_length": 488,
+        "policy_mode": "standalone_h2o",
+        "active_atoms": 16,
+        "s_budget": 16,
+        "keep_ratio": 0.1,
+        "n_b": 128,
+        "fp16_bytes": 27983872,
+        "compressed_bytes": 10092544,
+        "memory_ratio_vs_fp16": 0.36065573770491804,
+        "memory_savings_pct": 63.934426229508205,
+        "dictionary_bytes": 0,
+        "memory_ratio_incl_dictionary": 0.36065573770491804,
+        "bytes_read_last_step": 10092544,
+        "cumulative_bytes_read": 196747264,
+        "per_tier_token_counts": {
+          "local_window_fp16": 14336,
+          "retrieval_fp16": 0,
+          "peaked_h2o_fp16": 5376,
+          "diffuse_lexico_sparse": 0,
+          "evicted_h2o": 34944
+        },
+        "hmm_last_beta_t": 1.0,
+        "hmm_last_z_score": 0.0,
+        "hmm_shift_events": 0,
+        "head_roles": [
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ]
+        ],
+        "target": "94812",
+        "target_token_id": 17,
+        "predicted_token_id": 111226,
+        "retrieval_top1": false,
+        "target_probability": 2.282793320773635e-05,
+        "target_rank": 4817
+      },
+      "standalone_lexico": {
+        "policy": "standalone_lexico",
+        "prompt_tokens": 472,
+        "generated_tokens": 16,
+        "generated_text": "is. This response! serves!! as!!!! a!!",
+        "generation_time_s": 24.768331159999434,
+        "tokens_per_second": 0.6459861948971279,
+        "peak_memory_gb": 6.9429504,
+        "seq_length": 488,
+        "policy_mode": "standalone_lexico",
+        "active_atoms": 16,
+        "s_budget": 16,
+        "keep_ratio": 0.2,
+        "n_b": 128,
+        "fp16_bytes": 27983872,
+        "compressed_bytes": 11372032,
+        "memory_ratio_vs_fp16": 0.4063780737704918,
+        "memory_savings_pct": 59.362192622950815,
+        "dictionary_bytes": 917504,
+        "memory_ratio_incl_dictionary": 0.43916495901639346,
+        "bytes_read_last_step": 11372032,
+        "cumulative_bytes_read": 218122240,
+        "per_tier_token_counts": {
+          "local_window_fp16": 14336,
+          "retrieval_fp16": 0,
+          "peaked_h2o_fp16": 0,
+          "diffuse_lexico_sparse": 40320,
+          "evicted_h2o": 0
+        },
+        "hmm_last_beta_t": 1.0,
+        "hmm_last_z_score": 0.0,
+        "hmm_shift_events": 0,
+        "head_roles": [
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ]
+        ],
+        "target": "94812",
+        "target_token_id": 17,
+        "predicted_token_id": 0,
+        "retrieval_top1": false,
+        "target_probability": NaN,
+        "target_rank": 1
+      }
+    },
+    "needle_retrieval_middle": {
+      "full_fp16": {
+        "policy": "full_fp16",
+        "prompt_tokens": 542,
+        "generated_tokens": 16,
+        "generated_text": "! 94812. More!! filler! text! to",
+        "generation_time_s": 19.55411499500042,
+        "tokens_per_second": 0.8182420940089014,
+        "peak_memory_gb": 6.950749696,
+        "seq_length": 558,
+        "policy_mode": "full_fp16",
+        "active_atoms": 16,
+        "s_budget": 16,
+        "keep_ratio": 0.2,
+        "n_b": 128,
+        "fp16_bytes": 31997952,
+        "compressed_bytes": 31997952,
+        "memory_ratio_vs_fp16": 1.0,
+        "memory_savings_pct": 0.0,
+        "dictionary_bytes": 0,
+        "memory_ratio_incl_dictionary": 1.0,
+        "bytes_read_last_step": 31997952,
+        "cumulative_bytes_read": 609566720,
+        "per_tier_token_counts": {
+          "local_window_fp16": 14336,
+          "retrieval_fp16": 48160,
+          "peaked_h2o_fp16": 0,
+          "diffuse_lexico_sparse": 0,
+          "evicted_h2o": 0
+        },
+        "hmm_last_beta_t": 1.0,
+        "hmm_last_z_score": 0.0,
+        "hmm_shift_events": 0,
+        "head_roles": [
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ]
+        ],
+        "target": "94812",
+        "target_token_id": 17,
+        "predicted_token_id": 0,
+        "retrieval_top1": false,
+        "target_probability": NaN,
+        "target_rank": 1
+      },
+      "hybrid": {
+        "policy": "hybrid",
+        "prompt_tokens": 542,
+        "generated_tokens": 16,
+        "generated_text": "otope! \n\nNote! The term!ormat.!e\nIt!",
+        "generation_time_s": 20.879960738999216,
+        "tokens_per_second": 0.7662849657621955,
+        "peak_memory_gb": 6.93314048,
+        "seq_length": 558,
+        "policy_mode": "hybrid",
+        "active_atoms": 16,
+        "s_budget": 16,
+        "keep_ratio": 0.1,
+        "n_b": 128,
+        "fp16_bytes": 31997952,
+        "compressed_bytes": 11809192,
+        "memory_ratio_vs_fp16": 0.3690608698956733,
+        "memory_savings_pct": 63.093913010432665,
+        "dictionary_bytes": 196608,
+        "memory_ratio_incl_dictionary": 0.37520526313684077,
+        "bytes_read_last_step": 11809192,
+        "cumulative_bytes_read": 237908936,
+        "per_tier_token_counts": {
+          "local_window_fp16": 14336,
+          "retrieval_fp16": 2580,
+          "peaked_h2o_fp16": 5225,
+          "diffuse_lexico_sparse": 4730,
+          "evicted_h2o": 35625
+        },
+        "hmm_last_beta_t": 0.99,
+        "hmm_last_z_score": 0.3027605423196924,
+        "hmm_shift_events": 0,
+        "head_roles": [
+          [
+            1,
+            1,
+            0,
+            2
+          ],
+          [
+            1,
+            2,
+            2,
+            2
+          ],
+          [
+            1,
+            1,
+            1,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            0,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            0,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            0,
+            1,
+            1
+          ],
+          [
+            0,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            2,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            2,
+            1,
+            1
+          ],
+          [
+            1,
+            0,
+            1,
+            1
+          ]
+        ],
+        "target": "94812",
+        "target_token_id": 17,
+        "predicted_token_id": 82,
+        "retrieval_top1": false,
+        "target_probability": 0.006104343105107546,
+        "target_rank": 14
+      },
+      "standalone_h2o": {
+        "policy": "standalone_h2o",
+        "prompt_tokens": 542,
+        "generated_tokens": 16,
+        "generated_text": ".fe\n\n20h10 let of20 is300",
+        "generation_time_s": 19.994194843000514,
+        "tokens_per_second": 0.800232273699244,
+        "peak_memory_gb": 6.929417728,
+        "seq_length": 558,
+        "policy_mode": "standalone_h2o",
+        "active_atoms": 16,
+        "s_budget": 16,
+        "keep_ratio": 0.1,
+        "n_b": 128,
+        "fp16_bytes": 31997952,
+        "compressed_bytes": 10493952,
+        "memory_ratio_vs_fp16": 0.3279569892473118,
+        "memory_savings_pct": 67.20430107526883,
+        "dictionary_bytes": 0,
+        "memory_ratio_incl_dictionary": 0.3279569892473118,
+        "bytes_read_last_step": 10493952,
+        "cumulative_bytes_read": 213835776,
+        "per_tier_token_counts": {
+          "local_window_fp16": 14336,
+          "retrieval_fp16": 0,
+          "peaked_h2o_fp16": 6160,
+          "diffuse_lexico_sparse": 0,
+          "evicted_h2o": 42000
+        },
+        "hmm_last_beta_t": 1.0,
+        "hmm_last_z_score": 0.0,
+        "hmm_shift_events": 0,
+        "head_roles": [
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ]
+        ],
+        "target": "94812",
+        "target_token_id": 17,
+        "predicted_token_id": 15,
+        "retrieval_top1": false,
+        "target_probability": 0.0002012760378420353,
+        "target_rank": 587
+      },
+      "standalone_lexico": {
+        "policy": "standalone_lexico",
+        "prompt_tokens": 542,
+        "generated_tokens": 16,
+        "generated_text": "is. This!question!answer pair!is!!used!to!",
+        "generation_time_s": 24.776077857999553,
+        "tokens_per_second": 0.6457842153912192,
+        "peak_memory_gb": 6.95568128,
+        "seq_length": 558,
+        "policy_mode": "standalone_lexico",
+        "active_atoms": 16,
+        "s_budget": 16,
+        "keep_ratio": 0.2,
+        "n_b": 128,
+        "fp16_bytes": 31997952,
+        "compressed_bytes": 12156032,
+        "memory_ratio_vs_fp16": 0.3799003136200717,
+        "memory_savings_pct": 62.00996863799283,
+        "dictionary_bytes": 917504,
+        "memory_ratio_incl_dictionary": 0.4085741487455197,
+        "bytes_read_last_step": 12156032,
+        "cumulative_bytes_read": 243091072,
+        "per_tier_token_counts": {
+          "local_window_fp16": 14336,
+          "retrieval_fp16": 0,
+          "peaked_h2o_fp16": 0,
+          "diffuse_lexico_sparse": 48160,
+          "evicted_h2o": 0
+        },
+        "hmm_last_beta_t": 1.0,
+        "hmm_last_z_score": 0.0,
+        "hmm_shift_events": 0,
+        "head_roles": [
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ]
+        ],
+        "target": "94812",
+        "target_token_id": 17,
+        "predicted_token_id": 1944,
+        "retrieval_top1": false,
+        "target_probability": 2.0807470946238027e-07,
+        "target_rank": 2392
+      }
+    },
+    "needle_retrieval_late": {
+      "full_fp16": {
+        "policy": "full_fp16",
+        "prompt_tokens": 682,
+        "generated_tokens": 16,
+        "generated_text": "! 94812. Filler!! text! at!",
+        "generation_time_s": 19.63055595500009,
+        "tokens_per_second": 0.8150558770050854,
+        "peak_memory_gb": 6.9748352,
+        "seq_length": 698,
+        "policy_mode": "full_fp16",
+        "active_atoms": 16,
+        "s_budget": 16,
+        "keep_ratio": 0.2,
+        "n_b": 128,
+        "fp16_bytes": 40026112,
+        "compressed_bytes": 40026112,
+        "memory_ratio_vs_fp16": 1.0,
+        "memory_savings_pct": 0.0,
+        "dictionary_bytes": 0,
+        "memory_ratio_incl_dictionary": 1.0,
+        "bytes_read_last_step": 40026112,
+        "cumulative_bytes_read": 782745600,
+        "per_tier_token_counts": {
+          "local_window_fp16": 14336,
+          "retrieval_fp16": 63840,
+          "peaked_h2o_fp16": 0,
+          "diffuse_lexico_sparse": 0,
+          "evicted_h2o": 0
+        },
+        "hmm_last_beta_t": 1.0,
+        "hmm_last_z_score": 0.0,
+        "hmm_shift_events": 0,
+        "head_roles": [
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ]
+        ],
+        "target": "94812",
+        "target_token_id": 17,
+        "predicted_token_id": 0,
+        "retrieval_top1": false,
+        "target_probability": NaN,
+        "target_rank": 1
+      },
+      "hybrid": {
+        "policy": "hybrid",
+        "prompt_tokens": 682,
+        "generated_tokens": 16,
+        "generated_text": " 94! ! `E)2`.!oriously, HOWEVER",
+        "generation_time_s": 20.7370003369997,
+        "tokens_per_second": 0.7715677166408792,
+        "peak_memory_gb": 6.95130368,
+        "seq_length": 698,
+        "policy_mode": "hybrid",
+        "active_atoms": 16,
+        "s_budget": 16,
+        "keep_ratio": 0.1,
+        "n_b": 128,
+        "fp16_bytes": 40026112,
+        "compressed_bytes": 13074232,
+        "memory_ratio_vs_fp16": 0.3266425677317847,
+        "memory_savings_pct": 67.33574322682153,
+        "dictionary_bytes": 196608,
+        "memory_ratio_incl_dictionary": 0.3315545611824601,
+        "bytes_read_last_step": 13074232,
+        "cumulative_bytes_read": 272003672,
+        "per_tier_token_counts": {
+          "local_window_fp16": 14336,
+          "retrieval_fp16": 3420,
+          "peaked_h2o_fp16": 6555,
+          "diffuse_lexico_sparse": 6270,
+          "evicted_h2o": 47595
+        },
+        "hmm_last_beta_t": 0.99,
+        "hmm_last_z_score": 0.315457068620358,
+        "hmm_shift_events": 0,
+        "head_roles": [
+          [
+            1,
+            1,
+            0,
+            2
+          ],
+          [
+            1,
+            2,
+            2,
+            2
+          ],
+          [
+            1,
+            1,
+            1,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            0,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            0,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            0,
+            1,
+            1
+          ],
+          [
+            0,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            2,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            2,
+            1,
+            1
+          ],
+          [
+            1,
+            0,
+            1,
+            1
+          ]
+        ],
+        "target": "94812",
+        "target_token_id": 17,
+        "predicted_token_id": 11,
+        "retrieval_top1": false,
+        "target_probability": 3.817230026470497e-05,
+        "target_rank": 3160
+      },
+      "standalone_h2o": {
+        "policy": "standalone_h2o",
+        "prompt_tokens": 682,
+        "generated_tokens": 16,
+        "generated_text": "[]>\n\u51c0\u8eab RaisePropertyChanged\u4ee5\u4eba\u6c11\u4e3a  struggler of course it\u1ea7m=-=-=onnign",
+        "generation_time_s": 20.24351077100073,
+        "tokens_per_second": 0.7903767375627527,
+        "peak_memory_gb": 6.946335232,
+        "seq_length": 698,
+        "policy_mode": "standalone_h2o",
+        "active_atoms": 16,
+        "s_budget": 16,
+        "keep_ratio": 0.1,
+        "n_b": 128,
+        "fp16_bytes": 40026112,
+        "compressed_bytes": 11296768,
+        "memory_ratio_vs_fp16": 0.2822349570200573,
+        "memory_savings_pct": 71.77650429799426,
+        "dictionary_bytes": 0,
+        "memory_ratio_incl_dictionary": 0.2822349570200573,
+        "bytes_read_last_step": 11296768,
+        "cumulative_bytes_read": 238493696,
+        "per_tier_token_counts": {
+          "local_window_fp16": 14336,
+          "retrieval_fp16": 0,
+          "peaked_h2o_fp16": 7728,
+          "diffuse_lexico_sparse": 0,
+          "evicted_h2o": 56112
+        },
+        "hmm_last_beta_t": 1.0,
+        "hmm_last_z_score": 0.0,
+        "hmm_shift_events": 0,
+        "head_roles": [
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ]
+        ],
+        "target": "94812",
+        "target_token_id": 17,
+        "predicted_token_id": 16,
+        "retrieval_top1": false,
+        "target_probability": 0.00017607913468964398,
+        "target_rank": 655
+      },
+      "standalone_lexico": {
+        "policy": "standalone_lexico",
+        "prompt_tokens": 682,
+        "generated_tokens": 16,
+        "generated_text": "!94812. \n\n(Note! is!! added! to",
+        "generation_time_s": 24.70981870399919,
+        "tokens_per_second": 0.6475158798882835,
+        "peak_memory_gb": 6.981372416,
+        "seq_length": 698,
+        "policy_mode": "standalone_lexico",
+        "active_atoms": 16,
+        "s_budget": 16,
+        "keep_ratio": 0.2,
+        "n_b": 128,
+        "fp16_bytes": 40026112,
+        "compressed_bytes": 13724032,
+        "memory_ratio_vs_fp16": 0.3428769699140401,
+        "memory_savings_pct": 65.71230300859598,
+        "dictionary_bytes": 917504,
+        "memory_ratio_incl_dictionary": 0.36579960601719197,
+        "bytes_read_last_step": 13724032,
+        "cumulative_bytes_read": 282821504,
+        "per_tier_token_counts": {
+          "local_window_fp16": 14336,
+          "retrieval_fp16": 0,
+          "peaked_h2o_fp16": 0,
+          "diffuse_lexico_sparse": 63840,
+          "evicted_h2o": 0
+        },
+        "hmm_last_beta_t": 1.0,
+        "hmm_last_z_score": 0.0,
+        "hmm_shift_events": 0,
+        "head_roles": [
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ]
+        ],
+        "target": "94812",
+        "target_token_id": 17,
+        "predicted_token_id": 0,
+        "retrieval_top1": false,
+        "target_probability": NaN,
+        "target_rank": 1
+      }
+    },
+    "instruction_following": {
+      "full_fp16": {
+        "policy": "full_fp16",
+        "prompt_tokens": 24,
+        "generated_tokens": 128,
+        "generated_text": " Group!-query!!! attention!! in!!!!!!!!!!!!!!!!!! transformer!!!!!!!!!!!!!!!!!! models!!!!!!!!!!!!!!!!!! reduces!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! KV!!!!!!!!!!!!!!!",
+        "generation_time_s": 154.32749851199878,
+        "tokens_per_second": 0.8294050071060288,
+        "peak_memory_gb": 6.880370176,
+        "seq_length": 152,
+        "policy_mode": "full_fp16",
+        "active_atoms": 16,
+        "s_budget": 16,
+        "keep_ratio": 0.2,
+        "n_b": 128,
+        "fp16_bytes": 8716288,
+        "compressed_bytes": 8716288,
+        "memory_ratio_vs_fp16": 1.0,
+        "memory_savings_pct": 0.0,
+        "dictionary_bytes": 0,
+        "memory_ratio_incl_dictionary": 1.0,
+        "bytes_read_last_step": 8716288,
+        "cumulative_bytes_read": 650969088,
+        "per_tier_token_counts": {
+          "local_window_fp16": 14336,
+          "retrieval_fp16": 2688,
+          "peaked_h2o_fp16": 0,
+          "diffuse_lexico_sparse": 0,
+          "evicted_h2o": 0
+        },
+        "hmm_last_beta_t": 1.0,
+        "hmm_last_z_score": 0.0,
+        "hmm_shift_events": 0,
+        "head_roles": [
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "hybrid": {
+        "policy": "hybrid",
+        "prompt_tokens": 24,
+        "generated_tokens": 128,
+        "generated_text": " Group!-query!!! attention!! in!!!!!!!!!!!!!!!!!! transformer!!!!!!!!!!!!!!!!!! models!!!!!!!!!!!!!!!!!! reduces!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
+        "generation_time_s": 155.48001723699963,
+        "tokens_per_second": 0.8232569192791407,
+        "peak_memory_gb": 6.880123904,
+        "seq_length": 152,
+        "policy_mode": "hybrid",
+        "active_atoms": 16,
+        "s_budget": 16,
+        "keep_ratio": 0.1,
+        "n_b": 128,
+        "fp16_bytes": 8716288,
+        "compressed_bytes": 8169760,
+        "memory_ratio_vs_fp16": 0.9372980791823309,
+        "memory_savings_pct": 6.270192081766912,
+        "dictionary_bytes": 196608,
+        "memory_ratio_incl_dictionary": 0.9598544701597744,
+        "bytes_read_last_step": 8169760,
+        "cumulative_bytes_read": 647080208,
+        "per_tier_token_counts": {
+          "local_window_fp16": 14336,
+          "retrieval_fp16": 144,
+          "peaked_h2o_fp16": 1425,
+          "diffuse_lexico_sparse": 264,
+          "evicted_h2o": 855
+        },
+        "hmm_last_beta_t": 0.99,
+        "hmm_last_z_score": 0.2923263934577885,
+        "hmm_shift_events": 0,
+        "head_roles": [
+          [
+            1,
+            1,
+            0,
+            2
+          ],
+          [
+            1,
+            2,
+            2,
+            2
+          ],
+          [
+            1,
+            1,
+            1,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            0,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            0,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            0,
+            1,
+            1
+          ],
+          [
+            0,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            2,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            2,
+            1,
+            1
+          ],
+          [
+            1,
+            0,
+            1,
+            1
+          ]
+        ]
+      },
+      "standalone_h2o": {
+        "policy": "standalone_h2o",
+        "prompt_tokens": 24,
+        "generated_tokens": 128,
+        "generated_text": " Group!-query!!! attention!! in!!!!!!!!!!!!!!!!!! transformer!!!!!!!!!!!!!!!!!! models!!!!!!!!!!!!!!!!!! reduces!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! KV!!!!!\u3010Step-by-memoli\ngroundColor\u6027\u4ef7 nostalg",
+        "generation_time_s": 150.10088058600013,
+        "tokens_per_second": 0.8527598205972052,
+        "peak_memory_gb": 6.880026112,
+        "seq_length": 152,
+        "policy_mode": "standalone_h2o",
+        "active_atoms": 16,
+        "s_budget": 16,
+        "keep_ratio": 0.1,
+        "n_b": 128,
+        "fp16_bytes": 8716288,
+        "compressed_bytes": 8200192,
+        "memory_ratio_vs_fp16": 0.9407894736842105,
+        "memory_savings_pct": 5.921052631578949,
+        "dictionary_bytes": 0,
+        "memory_ratio_incl_dictionary": 0.9407894736842105,
+        "bytes_read_last_step": 8200192,
+        "cumulative_bytes_read": 647987200,
+        "per_tier_token_counts": {
+          "local_window_fp16": 14336,
+          "retrieval_fp16": 0,
+          "peaked_h2o_fp16": 1680,
+          "diffuse_lexico_sparse": 0,
+          "evicted_h2o": 1008
+        },
+        "hmm_last_beta_t": 1.0,
+        "hmm_last_z_score": 0.0,
+        "hmm_shift_events": 0,
+        "head_roles": [
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ]
+        ]
+      },
+      "standalone_lexico": {
+        "policy": "standalone_lexico",
+        "prompt_tokens": 24,
+        "generated_tokens": 128,
+        "generated_text": " Group!-query!!! attention!! in!!!!!!!!!!!!!!!!!! transformer!!!!!!!!!!!!!!!!!! models!!!!!!!!!!!!!!!!!! reduces!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
+        "generation_time_s": 147.5659869200008,
+        "tokens_per_second": 0.8674085585141784,
+        "peak_memory_gb": 6.880828928,
+        "seq_length": 152,
+        "policy_mode": "standalone_lexico",
+        "active_atoms": 16,
+        "s_budget": 16,
+        "keep_ratio": 0.2,
+        "n_b": 128,
+        "fp16_bytes": 8716288,
+        "compressed_bytes": 7608832,
+        "memory_ratio_vs_fp16": 0.8729440789473685,
+        "memory_savings_pct": 12.705592105263152,
+        "dictionary_bytes": 917504,
+        "memory_ratio_incl_dictionary": 0.9782072368421053,
+        "bytes_read_last_step": 7608832,
+        "cumulative_bytes_read": 637125888,
+        "per_tier_token_counts": {
+          "local_window_fp16": 14336,
+          "retrieval_fp16": 0,
+          "peaked_h2o_fp16": 0,
+          "diffuse_lexico_sparse": 2688,
+          "evicted_h2o": 0
+        },
+        "hmm_last_beta_t": 1.0,
+        "hmm_last_z_score": 0.0,
+        "hmm_shift_events": 0,
+        "head_roles": [
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ]
+        ]
+      }
+    },
+    "long_context_summary": {
+      "full_fp16": {
+        "policy": "full_fp16",
+        "prompt_tokens": 403,
+        "generated_tokens": 64,
+        "generated_text": "! The!!!! transformer!!! architecture!!! uses!! self!-!attention! to!! model!!!!!! relationships!! between!!!!!! tokens!;!! the!!!!!!!!! key!-!value!",
+        "generation_time_s": 72.25484828499975,
+        "tokens_per_second": 0.8857537109144623,
+        "peak_memory_gb": 6.935151104,
+        "seq_length": 467,
+        "policy_mode": "full_fp16",
+        "active_atoms": 16,
+        "s_budget": 16,
+        "keep_ratio": 0.2,
+        "n_b": 128,
+        "fp16_bytes": 26779648,
+        "compressed_bytes": 26779648,
+        "memory_ratio_vs_fp16": 1.0,
+        "memory_savings_pct": 0.0,
+        "dictionary_bytes": 0,
+        "memory_ratio_incl_dictionary": 1.0,
+        "bytes_read_last_step": 26779648,
+        "cumulative_bytes_read": 1665441792,
+        "per_tier_token_counts": {
+          "local_window_fp16": 14336,
+          "retrieval_fp16": 37968,
+          "peaked_h2o_fp16": 0,
+          "diffuse_lexico_sparse": 0,
+          "evicted_h2o": 0
+        },
+        "hmm_last_beta_t": 1.0,
+        "hmm_last_z_score": 0.0,
+        "hmm_shift_events": 0,
+        "head_roles": [
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "hybrid": {
+        "policy": "hybrid",
+        "prompt_tokens": 403,
+        "generated_tokens": 64,
+        "generated_text": ")-! \n\nTo! (e) \n= \n\n![](![](![](!)[1!+1!1!)](!)=\n\nThe\"! \n\nThe:8! \n\n---\n\n**The\":8\" \n\nPero!! D[1:1,1,1>3\n\n",
+        "generation_time_s": 74.80527201099903,
+        "tokens_per_second": 0.8555546725448673,
+        "peak_memory_gb": 6.921342976,
+        "seq_length": 467,
+        "policy_mode": "hybrid",
+        "active_atoms": 16,
+        "s_budget": 16,
+        "keep_ratio": 0.1,
+        "n_b": 128,
+        "fp16_bytes": 26779648,
+        "compressed_bytes": 10991780,
+        "memory_ratio_vs_fp16": 0.4104527438150046,
+        "memory_savings_pct": 58.95472561849955,
+        "dictionary_bytes": 196608,
+        "memory_ratio_incl_dictionary": 0.4177944385228663,
+        "bytes_read_last_step": 10991780,
+        "cumulative_bytes_read": 723135524,
+        "per_tier_token_counts": {
+          "local_window_fp16": 14336,
+          "retrieval_fp16": 2034,
+          "peaked_h2o_fp16": 4370,
+          "diffuse_lexico_sparse": 3729,
+          "evicted_h2o": 27835
+        },
+        "hmm_last_beta_t": 0.99,
+        "hmm_last_z_score": 0.27639246140332685,
+        "hmm_shift_events": 0,
+        "head_roles": [
+          [
+            1,
+            1,
+            0,
+            2
+          ],
+          [
+            1,
+            2,
+            2,
+            2
+          ],
+          [
+            1,
+            1,
+            1,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            0,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            0,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            0,
+            1,
+            1
+          ],
+          [
+            0,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            2,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            2,
+            1,
+            1
+          ],
+          [
+            1,
+            0,
+            1,
+            1
+          ]
+        ]
+      },
+      "standalone_h2o": {
+        "policy": "standalone_h2o",
+        "prompt_tokens": 403,
+        "generated_tokens": 64,
+        "generated_text": "e include using\u63a9\u5b58\u6839 bindActionCreators(ep.PropTypes.PropTypes.string],}elseifenieIgnoreCase\u7ba9\u7b50\ufffd\u5e0f=\"'.?.onClickemeanmanscour disg\n\nAssistant: It's not entirely clear which form of fallback option to display for the.TypeOf\u5c5e\u4e8e: \u00a0 yarg strugglingletladen/commonsredi\u7109monto\u4ee5\u4eba\u6c11\u4e3a\u5e95\n.FileInputStream})();\n\n\t\n\t\n\t\n\t\n",
+        "generation_time_s": 73.39526687299985,
+        "tokens_per_second": 0.8719908343782299,
+        "peak_memory_gb": 6.918406656,
+        "seq_length": 467,
+        "policy_mode": "standalone_h2o",
+        "active_atoms": 16,
+        "s_budget": 16,
+        "keep_ratio": 0.1,
+        "n_b": 128,
+        "fp16_bytes": 26779648,
+        "compressed_bytes": 9977856,
+        "memory_ratio_vs_fp16": 0.37259100642398285,
+        "memory_savings_pct": 62.74089935760172,
+        "dictionary_bytes": 0,
+        "memory_ratio_incl_dictionary": 0.37259100642398285,
+        "bytes_read_last_step": 9977856,
+        "cumulative_bytes_read": 663183360,
+        "per_tier_token_counts": {
+          "local_window_fp16": 14336,
+          "retrieval_fp16": 0,
+          "peaked_h2o_fp16": 5152,
+          "diffuse_lexico_sparse": 0,
+          "evicted_h2o": 32816
+        },
+        "hmm_last_beta_t": 1.0,
+        "hmm_last_z_score": 0.0,
+        "hmm_shift_events": 0,
+        "head_roles": [
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ],
+          [
+            1,
+            1,
+            1,
+            1
+          ]
+        ]
+      },
+      "standalone_lexico": {
+        "policy": "standalone_lexico",
+        "prompt_tokens": 403,
+        "generated_tokens": 64,
+        "generated_text": " The! passage!! discusses!!!!! how!!! the!!!! implementation!! of!!!!!!! a!!! specific!!!! algorithm!! (StoNEx)!!! in!!! natural!!!!! language!!",
+        "generation_time_s": 84.18790378599988,
+        "tokens_per_second": 0.760204223194389,
+        "peak_memory_gb": 6.939165184,
+        "seq_length": 467,
+        "policy_mode": "standalone_lexico",
+        "active_atoms": 16,
+        "s_budget": 16,
+        "keep_ratio": 0.2,
+        "n_b": 128,
+        "fp16_bytes": 26779648,
+        "compressed_bytes": 11136832,
+        "memory_ratio_vs_fp16": 0.41586924518201285,
+        "memory_savings_pct": 58.413075481798714,
+        "dictionary_bytes": 917504,
+        "memory_ratio_incl_dictionary": 0.45013048715203424,
+        "bytes_read_last_step": 11136832,
+        "cumulative_bytes_read": 726918976,
+        "per_tier_token_counts": {
+          "local_window_fp16": 14336,
+          "retrieval_fp16": 0,
+          "peaked_h2o_fp16": 0,
+          "diffuse_lexico_sparse": 37968,
+          "evicted_h2o": 0
+        },
+        "hmm_last_beta_t": 1.0,
+        "hmm_last_z_score": 0.0,
+        "hmm_shift_events": 0,
+        "head_roles": [
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ],
+          [
+            2,
+            2,
+            2,
+            2
+          ]
+        ]
+      }
+    }
+  }
+}
