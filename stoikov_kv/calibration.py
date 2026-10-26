@@ -847,6 +847,88 @@ class FallbackQwen2ForCausalLM(nn.Module):
             attentions=tuple(all_attns) if output_attentions else None,
         )
 
+    @torch.inference_mode()
+    def generate(
+        self,
+        input_ids: torch.Tensor,
+        max_new_tokens: int = 20,
+        do_sample: bool = False,
+        temperature: float = 1.0,
+        top_k: int = 50,
+        top_p: float = 1.0,
+        pad_token_id: Optional[int] = None,
+        eos_token_id: Optional[int] = None,
+        use_cache: bool = True,
+        **kwargs: Any,
+    ) -> torch.Tensor:
+        """
+        Generate tokens autoregressively.
+        
+        Args:
+            input_ids: Input token IDs [batch, seq_len]
+            max_new_tokens: Maximum number of new tokens to generate
+            do_sample: Whether to use sampling (if False, greedy decoding)
+            temperature: Sampling temperature
+            top_k: Top-k sampling
+            top_p: Top-p (nucleus) sampling
+            pad_token_id: Pad token ID
+            eos_token_id: EOS token ID
+            use_cache: Whether to use KV cache
+            
+        Returns:
+            Generated token IDs [batch, seq_len + max_new_tokens]
+        """
+        batch_size = input_ids.shape[0]
+        device = self.device
+        dtype = self.dtype
+        
+        if pad_token_id is None:
+            pad_token_id = getattr(self.config, "pad_token_id", 0)
+        if eos_token_id is None:
+            eos_token_id = getattr(self.config, "eos_token_id", 1)
+        
+        past_key_values = None
+        generated = input_ids.clone()
+        
+        for _ in range(max_new_tokens):
+            out = self.forward(
+                input_ids=generated if past_key_values is None else generated[:, -1:],
+                past_key_values=past_key_values,
+                use_cache=use_cache,
+                output_attentions=False,
+            )
+            
+            past_key_values = out.past_key_values
+            next_token_logits = out.logits[:, -1, :] / max(temperature, 1e-8)
+            
+            if do_sample:
+                # Apply top-k
+                if top_k > 0:
+                    indices_to_remove = next_token_logits < torch.topk(next_token_logits, top_k)[0][..., -1:]
+                    next_token_logits[indices_to_remove] = float("-inf")
+                
+                # Apply top-p
+                if top_p < 1.0:
+                    sorted_logits, sorted_indices = torch.sort(next_token_logits, descending=True)
+                    cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+                    sorted_indices_to_remove = cumulative_probs > top_p
+                    sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                    sorted_indices_to_remove[..., 0] = 0
+                    indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
+                    next_token_logits[indices_to_remove] = float("-inf")
+                
+                probs = F.softmax(next_token_logits, dim=-1)
+                next_tokens = torch.multinomial(probs, num_samples=1)
+            else:
+                next_tokens = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+            
+            generated = torch.cat([generated, next_tokens], dim=-1)
+            
+            if (next_tokens == eos_token_id).all():
+                break
+        
+        return generated
+
 
 def load_model_and_tokenizer(
     model_name: str = "Qwen/Qwen2.5-1.5B-Instruct",
@@ -854,11 +936,23 @@ def load_model_and_tokenizer(
     dtype: torch.dtype = torch.float16,
     seed: int = 42,
     use_real_model: bool = False,
+    load_in_4bit: bool = False,
+    bnb_4bit_compute_dtype: torch.dtype = torch.float16,
+    bnb_4bit_quant_type: str = "nf4",
+    bnb_4bit_use_double_quant: bool = True,
+    use_quanto: bool = False,
+    quanto_dtype: str = "int4",
 ) -> Tuple[nn.Module, Any]:
     """
     Loads a deterministic structured fallback by default.  Set
     ``use_real_model=True`` to explicitly load Hugging Face Qwen weights; this
     requires enough VRAM for both model weights and the long-context benchmark.
+    
+    For 7B models on limited VRAM, set ``load_in_4bit=True`` to use bitsandbytes
+    4-bit NF4 quantization (requires ``bitsandbytes`` installed).
+    
+    Alternatively, set ``use_quanto=True`` to use HuggingFace Quanto for quantization
+    (supports int4, int8, float8).
     """
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -883,17 +977,66 @@ def load_model_and_tokenizer(
         # Only use device_map on CUDA; force CPU if device is CPU
         use_cuda = torch.cuda.is_available() and not str(device).startswith("cpu")
         device_map = "auto" if use_cuda else device
-        max_memory = {0: "5.5GB"} if use_cuda else None
+        
+        # Adjust max_memory based on model size and quantization
+        if load_in_4bit or use_quanto:
+            max_memory = {0: "5GB"} if use_cuda else None
+        else:
+            # For 1.5B FP16 ~3.5GB, for 7B FP16 ~14GB, for 7B 8-bit ~7GB
+            is_7b = "7b" in model_name.lower() or "7B" in model_name
+            if is_7b and not (load_in_4bit or use_quanto):
+                max_memory = {0: "7GB", "cpu": "20GB"} if use_cuda else None
+            else:
+                max_memory = {0: "5.5GB"} if use_cuda else None
+        
+        # Prepare quantization config if requested
+        quantization_config = None
+        if load_in_4bit and use_cuda:
+            try:
+                from transformers import BitsAndBytesConfig
+                quantization_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=bnb_4bit_compute_dtype,
+                    bnb_4bit_quant_type=bnb_4bit_quant_type,
+                    bnb_4bit_use_double_quant=bnb_4bit_use_double_quant,
+                )
+                print(f"[StoikovKV] Loading {model_name} with 4-bit NF4 quantization (bitsandbytes)")
+            except ImportError:
+                print("[StoikovKV] Warning: bitsandbytes not available, falling back to FP16")
+                load_in_4bit = False
+        
+        model_kwargs = {
+            "torch_dtype": dtype if not (load_in_4bit or use_quanto) else bnb_4bit_compute_dtype,
+            "device_map": device_map,
+            "max_memory": max_memory,
+            "low_cpu_mem_usage": True,
+            "attn_implementation": "eager",
+            "trust_remote_code": True,
+        }
+        if quantization_config is not None:
+            model_kwargs["quantization_config"] = quantization_config
         
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            torch_dtype=dtype,
-            device_map=device_map,
-            max_memory=max_memory,
-            low_cpu_mem_usage=True,
-            attn_implementation="eager",
-            trust_remote_code=True,
+            **model_kwargs,
         )
+        
+        # Apply Quanto quantization if requested and bitsandbytes failed or not requested
+        if use_quanto and use_cuda and not load_in_4bit:
+            try:
+                import quanto
+                print(f"[StoikovKV] Applying Quanto {quanto_dtype} quantization...")
+                if quanto_dtype == "int4":
+                    quanto.quantize(model, weights=quanto.qint4)
+                elif quanto_dtype == "int8":
+                    quanto.quantize(model, weights=quanto.qint8)
+                elif quanto_dtype == "float8":
+                    quanto.quantize(model, weights=quanto.qfloat8)
+                quanto.freeze(model)
+                print("[StoikovKV] Quanto quantization applied successfully")
+            except Exception as e:
+                print(f"[StoikovKV] Warning: Quanto quantization failed: {e}")
+        
         model.eval()
         return model, tokenizer
     except Exception as exc:
