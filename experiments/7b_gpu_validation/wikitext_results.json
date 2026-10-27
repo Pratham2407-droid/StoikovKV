@@ -1,0 +1,105 @@
+{
+  "model": "Qwen2.5-1.5B-Instruct (Standalone GQA, Fallback 12L/4KV/h=64)",
+  "dataset": "WikiText-103 test",
+  "num_samples": 50,
+  "max_tokens_per_sample": 2048,
+  "device": "cuda",
+  "policies": {
+    "full_fp16": {
+      "policy": "full_fp16",
+      "total_tokens_processed": 3835,
+      "total_time_s": 2.6312306999989232,
+      "tokens_per_second": 1457.4928758628307,
+      "peak_memory_gb": 0.414774272,
+      "fp16_bytes": 47124480,
+      "compressed_bytes": 47124480,
+      "memory_ratio_vs_fp16": 1.0,
+      "memory_savings_pct": 0.0,
+      "bytes_read_last_step": 47124480,
+      "cumulative_bytes_read": 1529573376,
+      "per_tier_token_counts": {
+        "local_window_fp16": 6144,
+        "retrieval_fp16": 177936,
+        "peaked_h2o_fp16": 0,
+        "diffuse_lexico_sparse": 0,
+        "evicted_h2o": 0
+      },
+      "hmm_last_beta_t": 1.0,
+      "hmm_last_z_score": 0.0,
+      "hmm_shift_events": 0,
+      "perplexity": 1504417920.0
+    },
+    "hybrid": {
+      "policy": "hybrid",
+      "total_tokens_processed": 3835,
+      "total_time_s": 3.807473849999951,
+      "tokens_per_second": 1007.2295046754028,
+      "peak_memory_gb": 0.382532608,
+      "fp16_bytes": 47124480,
+      "compressed_bytes": 9344316,
+      "memory_ratio_vs_fp16": 0.19829006070730118,
+      "memory_savings_pct": 80.17099392926988,
+      "bytes_read_last_step": 9344316,
+      "cumulative_bytes_read": 345769580,
+      "per_tier_token_counts": {
+        "local_window_fp16": 6144,
+        "retrieval_fp16": 7414,
+        "peaked_h2o_fp16": 15703,
+        "diffuse_lexico_sparse": 18535,
+        "evicted_h2o": 136284
+      },
+      "hmm_last_beta_t": 0.99,
+      "hmm_last_z_score": 0.6692272547823843,
+      "hmm_shift_events": 14,
+      "perplexity": 1265958016.0
+    },
+    "standalone_h2o": {
+      "policy": "standalone_h2o",
+      "total_tokens_processed": 3835,
+      "total_time_s": 2.430758811000487,
+      "tokens_per_second": 1577.6966363937747,
+      "peak_memory_gb": 0.374887424,
+      "fp16_bytes": 47124480,
+      "compressed_bytes": 6279168,
+      "memory_ratio_vs_fp16": 0.13324641460234682,
+      "memory_savings_pct": 86.67535853976531,
+      "bytes_read_last_step": 6279168,
+      "cumulative_bytes_read": 250073088,
+      "per_tier_token_counts": {
+        "local_window_fp16": 6144,
+        "retrieval_fp16": 0,
+        "peaked_h2o_fp16": 18384,
+        "diffuse_lexico_sparse": 0,
+        "evicted_h2o": 159552
+      },
+      "hmm_last_beta_t": 1.0,
+      "hmm_last_z_score": 0.0,
+      "hmm_shift_events": 0,
+      "perplexity": 1333481216.0
+    },
+    "standalone_lexico": {
+      "policy": "standalone_lexico",
+      "total_tokens_processed": 3835,
+      "total_time_s": 10.611389477999182,
+      "tokens_per_second": 361.40413165977805,
+      "peak_memory_gb": 0.432454144,
+      "fp16_bytes": 47124480,
+      "compressed_bytes": 19366464,
+      "memory_ratio_vs_fp16": 0.41096398305084747,
+      "memory_savings_pct": 58.90360169491525,
+      "bytes_read_last_step": 19366464,
+      "cumulative_bytes_read": 656959296,
+      "per_tier_token_counts": {
+        "local_window_fp16": 6144,
+        "retrieval_fp16": 0,
+        "peaked_h2o_fp16": 0,
+        "diffuse_lexico_sparse": 177936,
+        "evicted_h2o": 0
+      },
+      "hmm_last_beta_t": 1.0,
+      "hmm_last_z_score": 0.0,
+      "hmm_shift_events": 0,
+      "perplexity": 1454906496.0
+    }
+  }
+}

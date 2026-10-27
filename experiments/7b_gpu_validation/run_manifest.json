@@ -1,0 +1,39 @@
+{
+  "experiment": "7b_gpu_validation",
+  "timestamp": "2026-10-26T15:13:01.956340",
+  "git": {
+    "commit": "unknown",
+    "status": [
+      "unknown"
+    ]
+  },
+  "environment": {
+    "timestamp": "2026-10-26T15:13:07.447723",
+    "python_version": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+    "torch_version": "2.14.1+cu130",
+    "transformers_version": "5.20.2",
+    "cuda_available": true,
+    "cuda_version": "13.0",
+    "gpu_name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+    "gpu_vram_gb": 8.186822656,
+    "cudnn_version": 92400
+  },
+  "model": {
+    "name": "Qwen/Qwen2.5-7B-Instruct",
+    "revision": "a09a35458c702b33eeacc393d103063234e8bc28",
+    "quantization": "4-bit NF4"
+  },
+  "file_hashes": {
+    "calibration.py": "508b550b95536728acbaf3a3cec62060fc5ad75ebc049958c1c353c51499c5db",
+    "cache.py": "f68166d227595d877231778562e827d02e86fc901ec569e2c51d1dbfbee53b44",
+    "elastic_lexico.py": "3f20fedab34e0789ca9b3c37c0c09fba4881f1ab02038609dd1b37dc48d15522",
+    "bench_7b_baseline.py": "61626edf053dfc006ab836c906f2d56adf47ca5c5e61243980dbf316ae8015d2",
+    "calibrate_7b.py": "dcea05f14c094e5157acf426e57c684f32f9ec8ca536f1a84f7e976fd655e1bd",
+    "bench_7b_stoikovkv.py": "2c2047860818d6bab852fd4c5cf45bd337b675c1024e2ed4c3143a17fbe80b10",
+    "plan.md": "f96706c72810dde2aa84c4e009b52bd0ba3c62a37540256c459774c4432498ce"
+  },
+  "artifacts": {
+    "calibrated_artifacts_1.5b": "/mnt/storage/Projects/StoikovKV_Hackathon/calibrated_artifacts.pt",
+    "calibrated_artifacts_7b": "/mnt/storage/Projects/StoikovKV_Hackathon/calibrated_artifacts_7b.pt"
+  }
+}

@@ -1,0 +1,312 @@
+{
+  "project": "StoikovKV",
+  "module": "Person 2 Live Inference Engine & Matryoshka Self-Speculative Decoding",
+  "device": "cuda",
+  "dtype": "torch.float16",
+  "model_name": "Qwen/Qwen2.5-1.5B-Instruct (Standalone GQA)",
+  "backend_info": {
+    "attn_implementation": "eager",
+    "output_attentions_used_in_live_inference": false
+  },
+  "independence_mock_artifacts_verified": true,
+  "validity": {
+    "full_fp16_needle_baseline_passes": true,
+    "configs_over_20pct_kv_budget": [],
+    "budget_rule": "equal-memory solver (solve_equal_budget_params), target <= 20% of FP16 KV bytes",
+    "model_is_synthetic_fallback": true
+  },
+  "four_config_ablation_2k_context": {
+    "Full FP16 (100% Memory)": {
+      "short_name": "Full FP16",
+      "policy_mode": "full_fp16",
+      "prompt_tokens": 2037,
+      "memory_ratio_vs_fp16": 1.0,
+      "memory_budget_pct": 100.0,
+      "dictionary_bytes": 0,
+      "memory_ratio_incl_dictionary": 1.0,
+      "keep_ratio": 1.0,
+      "s_budget": 16,
+      "needle_per_depth_correct": [
+        {
+          "depth": 0.05,
+          "correct": true,
+          "pred_token": 8443
+        },
+        {
+          "depth": 0.12,
+          "correct": true,
+          "pred_token": 8443
+        },
+        {
+          "depth": 0.22,
+          "correct": true,
+          "pred_token": 8443
+        },
+        {
+          "depth": 0.35,
+          "correct": true,
+          "pred_token": 8443
+        }
+      ],
+      "fp16_bytes": 58404864,
+      "compressed_bytes": 58404864,
+      "needle_passkey_accuracy": 1.0,
+      "needle_passkey_accuracy_pct": 100.0,
+      "needle_target_prob": 1.0,
+      "needle_logit_margin": 2450.5625,
+      "turn2_css_logit_cosine": 0.9999999403953552,
+      "turn2_h2o_freshness_pct": 42.56259204712813,
+      "composite_multiturn_quality_pct": 99.99999701976776,
+      "hmm_shift_events_detected": 0,
+      "per_tier_token_counts": {
+        "local_window_fp16": 3584,
+        "retrieval_fp16": 110488,
+        "peaked_h2o_fp16": 0,
+        "diffuse_lexico_sparse": 0,
+        "evicted_h2o": 0
+      },
+      "eval_time_sec": 1.3167222690099152
+    },
+    "Standalone H2O (20% Memory - All Heads Evict)": {
+      "short_name": "Standalone H2O",
+      "policy_mode": "standalone_h2o",
+      "prompt_tokens": 2037,
+      "memory_ratio_vs_fp16": 0.19931271477663232,
+      "memory_budget_pct": 19.93127147766323,
+      "dictionary_bytes": 0,
+      "memory_ratio_incl_dictionary": 0.19931271477663232,
+      "keep_ratio": 0.168,
+      "s_budget": 16,
+      "needle_per_depth_correct": [
+        {
+          "depth": 0.05,
+          "correct": true,
+          "pred_token": 8443
+        },
+        {
+          "depth": 0.12,
+          "correct": true,
+          "pred_token": 8443
+        },
+        {
+          "depth": 0.22,
+          "correct": true,
+          "pred_token": 8443
+        },
+        {
+          "depth": 0.35,
+          "correct": true,
+          "pred_token": 8443
+        }
+      ],
+      "fp16_bytes": 58404864,
+      "compressed_bytes": 11640832,
+      "needle_passkey_accuracy": 1.0,
+      "needle_passkey_accuracy_pct": 100.0,
+      "needle_target_prob": 1.0,
+      "needle_logit_margin": 2364.53125,
+      "turn2_css_logit_cosine": 0.9777199029922485,
+      "turn2_h2o_freshness_pct": 42.97723475355054,
+      "composite_multiturn_quality_pct": 98.88599514961243,
+      "hmm_shift_events_detected": 0,
+      "per_tier_token_counts": {
+        "local_window_fp16": 3584,
+        "retrieval_fp16": 0,
+        "peaked_h2o_fp16": 19152,
+        "diffuse_lexico_sparse": 0,
+        "evicted_h2o": 91336
+      },
+      "eval_time_sec": 1.7243769110064022
+    },
+    "Standalone Lexico (20% Memory - All Heads Encode)": {
+      "short_name": "Standalone Lexico",
+      "policy_mode": "standalone_lexico",
+      "prompt_tokens": 2037,
+      "memory_ratio_vs_fp16": 0.19789365488463426,
+      "memory_budget_pct": 19.789365488463424,
+      "dictionary_bytes": 1835008,
+      "memory_ratio_incl_dictionary": 0.22931240795287186,
+      "keep_ratio": 1.0,
+      "s_budget": 14,
+      "needle_per_depth_correct": [
+        {
+          "depth": 0.05,
+          "correct": true,
+          "pred_token": 8443
+        },
+        {
+          "depth": 0.12,
+          "correct": true,
+          "pred_token": 8443
+        },
+        {
+          "depth": 0.22,
+          "correct": true,
+          "pred_token": 8443
+        },
+        {
+          "depth": 0.35,
+          "correct": true,
+          "pred_token": 8443
+        }
+      ],
+      "fp16_bytes": 58404864,
+      "compressed_bytes": 11557952,
+      "needle_passkey_accuracy": 1.0,
+      "needle_passkey_accuracy_pct": 100.0,
+      "needle_target_prob": 1.0,
+      "needle_logit_margin": 2759.15625,
+      "turn2_css_logit_cosine": 0.8744678497314453,
+      "turn2_h2o_freshness_pct": 0.0,
+      "composite_multiturn_quality_pct": 93.72339248657227,
+      "hmm_shift_events_detected": 0,
+      "per_tier_token_counts": {
+        "local_window_fp16": 3584,
+        "retrieval_fp16": 0,
+        "peaked_h2o_fp16": 0,
+        "diffuse_lexico_sparse": 110488,
+        "evicted_h2o": 0
+      },
+      "eval_time_sec": 5.8907476870081155
+    },
+    "StoikovKV Hybrid (Retrieval Guard + Peaked H2O + Diffuse Lexico + HMM Decay)": {
+      "short_name": "StoikovKV Hybrid",
+      "policy_mode": "hybrid",
+      "prompt_tokens": 2037,
+      "memory_ratio_vs_fp16": 0.19763614208570027,
+      "memory_budget_pct": 19.763614208570026,
+      "dictionary_bytes": 393216,
+      "memory_ratio_incl_dictionary": 0.20436873202889402,
+      "keep_ratio": 0.1211,
+      "s_budget": 10,
+      "needle_per_depth_correct": [
+        {
+          "depth": 0.05,
+          "correct": true,
+          "pred_token": 8443
+        },
+        {
+          "depth": 0.12,
+          "correct": true,
+          "pred_token": 8443
+        },
+        {
+          "depth": 0.22,
+          "correct": true,
+          "pred_token": 8443
+        },
+        {
+          "depth": 0.35,
+          "correct": true,
+          "pred_token": 8443
+        }
+      ],
+      "fp16_bytes": 58404864,
+      "compressed_bytes": 11542912,
+      "needle_passkey_accuracy": 1.0,
+      "needle_passkey_accuracy_pct": 100.0,
+      "needle_target_prob": 1.0,
+      "needle_logit_margin": 2547.15625,
+      "turn2_css_logit_cosine": 0.873019814491272,
+      "turn2_h2o_freshness_pct": 100.0,
+      "composite_multiturn_quality_pct": 93.6509907245636,
+      "hmm_shift_events_detected": 8,
+      "per_tier_token_counts": {
+        "local_window_fp16": 3584,
+        "retrieval_fp16": 5919,
+        "peaked_h2o_fp16": 11562,
+        "diffuse_lexico_sparse": 11838,
+        "evicted_h2o": 81169
+      },
+      "eval_time_sec": 2.2079579349956475
+    }
+  },
+  "matryoshka_speculative_sweep": {
+    "prompt_tokens": 1068,
+    "verify_atoms_s": 16,
+    "gamma_spec": 4,
+    "max_new_tokens": 64,
+    "sweep": [
+      {
+        "draft_atoms_m": 2,
+        "verify_atoms_s": 16,
+        "gamma_spec": 4,
+        "max_new_tokens": 64,
+        "draft_lexico_bytes_per_vec": 8,
+        "verify_lexico_bytes_per_vec": 50,
+        "acceptance_rate_alpha": 0.96875,
+        "expected_acceptance_rate_alpha": 0.9373709637671712,
+        "avg_accepted_tokens_per_verify_pass": 3.6470588235294117,
+        "avg_tokens_per_cycle": 4.647058823529411,
+        "kv_bytes_read_per_token": 7601034.0,
+        "standard_decode_kv_bytes_per_token": 7992264.0,
+        "standard_fp16_kv_bytes_per_token": 31510528.0,
+        "bandwidth_savings_vs_standard_decode_pct": 4.895108569987173,
+        "bandwidth_savings_vs_fp16_pct": 75.87779551012284,
+        "first_generated_token_id": 8443,
+        "passkey_8443_retrieved_in_generation": true,
+        "generated_preview": " 8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443 "
+      },
+      {
+        "draft_atoms_m": 4,
+        "verify_atoms_s": 16,
+        "gamma_spec": 4,
+        "max_new_tokens": 64,
+        "draft_lexico_bytes_per_vec": 14,
+        "verify_lexico_bytes_per_vec": 50,
+        "acceptance_rate_alpha": 1.0,
+        "expected_acceptance_rate_alpha": 0.9736726615577934,
+        "avg_accepted_tokens_per_verify_pass": 4.0,
+        "avg_tokens_per_cycle": 5.0,
+        "kv_bytes_read_per_token": 7656924.0,
+        "standard_decode_kv_bytes_per_token": 7992264.0,
+        "standard_fp16_kv_bytes_per_token": 31510528.0,
+        "bandwidth_savings_vs_standard_decode_pct": 4.195807345703296,
+        "bandwidth_savings_vs_fp16_pct": 75.70042621945274,
+        "first_generated_token_id": 8443,
+        "passkey_8443_retrieved_in_generation": true,
+        "generated_preview": " 8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443 "
+      },
+      {
+        "draft_atoms_m": 8,
+        "verify_atoms_s": 16,
+        "gamma_spec": 4,
+        "max_new_tokens": 64,
+        "draft_lexico_bytes_per_vec": 26,
+        "verify_lexico_bytes_per_vec": 50,
+        "acceptance_rate_alpha": 1.0,
+        "expected_acceptance_rate_alpha": 0.9812787596136331,
+        "avg_accepted_tokens_per_verify_pass": 4.0,
+        "avg_tokens_per_cycle": 5.0,
+        "kv_bytes_read_per_token": 7768704.0,
+        "standard_decode_kv_bytes_per_token": 7992264.0,
+        "standard_fp16_kv_bytes_per_token": 31510528.0,
+        "bandwidth_savings_vs_standard_decode_pct": 2.79720489713553,
+        "bandwidth_savings_vs_fp16_pct": 75.34568763811257,
+        "first_generated_token_id": 8443,
+        "passkey_8443_retrieved_in_generation": true,
+        "generated_preview": " 8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443 "
+      },
+      {
+        "draft_atoms_m": 12,
+        "verify_atoms_s": 16,
+        "gamma_spec": 4,
+        "max_new_tokens": 64,
+        "draft_lexico_bytes_per_vec": 38,
+        "verify_lexico_bytes_per_vec": 50,
+        "acceptance_rate_alpha": 1.0,
+        "expected_acceptance_rate_alpha": 0.9853347852826118,
+        "avg_accepted_tokens_per_verify_pass": 4.0,
+        "avg_tokens_per_cycle": 5.0,
+        "kv_bytes_read_per_token": 7880484.0,
+        "standard_decode_kv_bytes_per_token": 7992264.0,
+        "standard_fp16_kv_bytes_per_token": 31510528.0,
+        "bandwidth_savings_vs_standard_decode_pct": 1.398602448567765,
+        "bandwidth_savings_vs_fp16_pct": 74.9909490567724,
+        "first_generated_token_id": 8443,
+        "passkey_8443_retrieved_in_generation": true,
+        "generated_preview": " 8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443  8443 "
+      }
+    ]
+  }
+}

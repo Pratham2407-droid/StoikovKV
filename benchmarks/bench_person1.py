@@ -62,7 +62,9 @@ from stoikov_kv.calibration import (
     _inspect_model_architecture,
     calibrate_model,
     evaluate_compressed_cache_passkey,
-    load_model_and_tokenizer,
+    FallbackQwen2Config,
+    FallbackQwen2ForCausalLM,
+    FallbackQwen2Tokenizer,
 )
 from stoikov_kv.elastic_lexico import ElasticLexicoCodec
 
@@ -363,8 +365,8 @@ def plot_probe_correlation(
 
     p_vis = np.log1p(np.maximum(0.0, p_scores))
     g_vis = np.log1p(np.maximum(0.0, g_scores))
-    p_norm = (p_vis - p_vis.min()) / (p_vis.ptp() + 1e-8)
-    g_norm = (g_vis - g_vis.min()) / (g_vis.ptp() + 1e-8)
+    p_norm = (p_vis - p_vis.min()) / (p_vis.max() - p_vis.min() + 1e-8)
+    g_norm = (g_vis - g_vis.min()) / (g_vis.max() - g_vis.min() + 1e-8)
 
     k_top = max(1, int(round(0.20 * len(p_scores))))
     top_g_idx = set(np.argsort(g_scores)[-k_top:].tolist())
@@ -400,7 +402,7 @@ def plot_probe_correlation(
         linewidth=1.0,
     )
 
-    if len(g_norm) > 2 and g_norm.ptp() > 1e-8 and p_norm.ptp() > 1e-8:
+    if len(g_norm) > 2 and (g_norm.max() - g_norm.min()) > 1e-8 and (p_norm.max() - p_norm.min()) > 1e-8:
         m_fit, b_fit = np.polyfit(g_norm, p_norm, 1)
         xs = np.linspace(0, 1, 100)
         ax1.plot(xs, m_fit * xs + b_fit, "--", color="#f59e0b", linewidth=2.0, label="Linear Trend Fit")
@@ -668,13 +670,13 @@ def plot_elasticnet_vs_omp(
         )
 
     ax2.set_title(
-        "Nested Partial Decoding ($|y_{(1)}| \\geq \\dots \\geq |y_{(s)}|$, single s=16 code)",
+        "Nested Partial Decoding ($|y_{(1)}| \\geq \\dots \\geq |y_{(s)}|$, single s=32 code)",
         fontsize=11.4,
         fontweight="bold",
         color="#f8fafc",
         pad=12,
     )
-    ax2.set_xlabel("Active Decoded Atoms $m$ (out of $s=16$ stored atoms)", fontsize=10.0, color="#cbd5e1")
+    ax2.set_xlabel("Active Decoded Atoms $m$ (out of $s=32$ stored atoms)", fontsize=10.0, color="#cbd5e1")
     ax2.set_ylabel("Cosine Similarity $\\cos(X, \\hat{X}_m)$", fontsize=10.0, color="#38bdf8")
     ax2_twin.set_ylabel("Relative Reconstruction Error $\\|X - \\hat{X}_m\\|_2^2 / \\|X\\|_2^2$", fontsize=10.0, color="#f59e0b")
     ax2.set_xticks(m_list)
@@ -840,9 +842,25 @@ def run_person1_benchmarks(seed: int = 42) -> Dict[str, Any]:
     print("=" * 80)
 
     # 1. Load model and run offline calibration
-    model, tokenizer = load_model_and_tokenizer(seed=seed)
+    # Force fallback model to avoid HF Hub download and vocab mismatch
+    from stoikov_kv.calibration import FallbackQwen2Config, FallbackQwen2ForCausalLM, FallbackQwen2Tokenizer
+    cfg = FallbackQwen2Config(
+        num_hidden_layers=28,
+        num_attention_heads=12,
+        num_key_value_heads=2,
+        hidden_size=1536,
+        vocab_size=32768,
+        rope_theta=1000000.0,
+    )
+    model = FallbackQwen2ForCausalLM(cfg, device="cuda", dtype=torch.float16, seed=seed)
+    tokenizer = FallbackQwen2Tokenizer(vocab_size=32768)
+    model.eval()
+
     artifacts_path = os.path.join(REPO_ROOT, "calibrated_artifacts.pt")
-    artifacts = calibrate_model(model, tokenizer, save_path=artifacts_path, seed=seed)
+    artifacts = calibrate_model(
+        model, tokenizer, save_path=artifacts_path, seed=seed,
+        dict_atoms=128, dict_steps=10, max_seq_len=256, subspace_rank=16
+    )
 
     codec = ElasticLexicoCodec.from_artifacts(artifacts)
     device = codec.device
@@ -858,8 +876,8 @@ def run_person1_benchmarks(seed: int = 42) -> Dict[str, Any]:
     )
     X_bench = X_eval_pool[:1024].contiguous()
 
-    # 2. Fair Encoder & Decoder Benchmark across s in {4, 8, 12, 16}
-    s_values = [4, 8, 12, 16]
+    # 2. Fair Encoder & Decoder Benchmark across s in {4, 8, 12, 16, 32}
+    s_values = [4, 8, 12, 16, 32]
     fast_encode_median: List[float] = []
     fast_encode_iqr: List[float] = []
     fast_decode_median: List[float] = []
@@ -989,7 +1007,7 @@ def run_person1_benchmarks(seed: int = 42) -> Dict[str, Any]:
             f"FISTA: {fista_enc_stats['median_ms']:6.3f}ms (cos={q_fista['cosine_similarity']:.4f})"
         )
 
-    # Also measure CPU encode/decode latency at s=16 on 256 vectors for hardware portability reporting
+    # Also measure CPU encode/decode latency at s=32 on 256 vectors for hardware portability reporting
     codec_cpu = ElasticLexicoCodec(
         D=codec.D.detach().cpu(),
         W_ridge=codec.W_ridge.detach().cpu(),
@@ -998,12 +1016,12 @@ def run_person1_benchmarks(seed: int = 42) -> Dict[str, Any]:
     )
     X_cpu = X_bench[:256].detach().cpu().to(torch.float32)
     cpu_enc_stats = _measure_latency_stats(
-        lambda: codec_cpu.encode(X_cpu, layer_idx=0, s=16),
+        lambda: codec_cpu.encode(X_cpu, layer_idx=0, s=32),
         device=torch.device("cpu"),
         warmup=2,
         repetitions=7,
     )
-    idx_cpu, val_cpu = codec_cpu.encode(X_cpu, layer_idx=0, s=16)
+    idx_cpu, val_cpu = codec_cpu.encode(X_cpu, layer_idx=0, s=32)
     cpu_dec_stats = _measure_latency_stats(
         lambda: codec_cpu.decode(idx_cpu, val_cpu, layer_idx=0),
         device=torch.device("cpu"),
@@ -1011,11 +1029,11 @@ def run_person1_benchmarks(seed: int = 42) -> Dict[str, Any]:
         repetitions=7,
     )
 
-    # 3. Benchmark Nested Partial Decoding (m in {2, 4, 8, 12, 16}) from a single s=16 code
-    print("\n--- Benchmark 3: Nested Partial Decoder (Single s=16 Code, Rescaled vs Unrescaled) ---")
-    idx_16_rs, val_16_rs = codec.encode(X_bench, layer_idx=0, s=16, lambda1=0.04, norm_rescale=True)
-    idx_16_un, val_16_un = codec.encode(X_bench, layer_idx=0, s=16, lambda1=0.04, norm_rescale=False)
-    m_values = [2, 4, 8, 12, 16]
+    # 3. Benchmark Nested Partial Decoding (m in {4, 8, 12, 16, 32}) from a single s=32 code
+    print("\n--- Benchmark 3: Nested Partial Decoder (Single s=32 Code, Rescaled vs Unrescaled) ---")
+    idx_32_rs, val_32_rs = codec.encode(X_bench, layer_idx=0, s=32, lambda1=0.04, norm_rescale=True)
+    idx_32_un, val_32_un = codec.encode(X_bench, layer_idx=0, s=32, lambda1=0.04, norm_rescale=False)
+    m_values = [4, 8, 12, 16, 32]
     mat_cos_rs: List[float] = []
     mat_rel_mse_rs: List[float] = []
     mat_cos_un: List[float] = []
@@ -1024,12 +1042,12 @@ def run_person1_benchmarks(seed: int = 42) -> Dict[str, Any]:
     mat_dec_median_ms: List[float] = []
 
     for m in m_values:
-        x_hat_m_rs = codec.decode(idx_16_rs, val_16_rs, layer_idx=0, active_atoms=m)
-        x_hat_m_un = codec.decode(idx_16_un, val_16_un, layer_idx=0, active_atoms=m)
+        x_hat_m_rs = codec.decode(idx_32_rs, val_32_rs, layer_idx=0, active_atoms=m)
+        x_hat_m_un = codec.decode(idx_32_un, val_32_un, layer_idx=0, active_atoms=m)
         q_m_rs = codec.evaluate_reconstruction(X_bench, x_hat_m_rs)
         q_m_un = codec.evaluate_reconstruction(X_bench, x_hat_m_un)
         dec_m_stats = _measure_latency_stats(
-            lambda m_val=m: codec.decode(idx_16_rs, val_16_rs, layer_idx=0, active_atoms=m_val),
+            lambda m_val=m: codec.decode(idx_32_rs, val_32_rs, layer_idx=0, active_atoms=m_val),
             device=device,
             warmup=3,
             repetitions=10,
@@ -1063,10 +1081,10 @@ def run_person1_benchmarks(seed: int = 42) -> Dict[str, Any]:
         X_eval, eval_stats = _collect_domain_kv_states(
             model, tokenizer, eval_prompts, layer_idx=0, target_tokens=256, max_seq_len=256
         )
-        idx_ad, val_ad = codec.encode(X_adapt, layer_idx=0, s=16, lambda1=0.04)
+        idx_ad, val_ad = codec.encode(X_adapt, layer_idx=0, s=32, lambda1=0.04)
         X_hat_adapt = codec.decode(idx_ad, val_ad, layer_idx=0)
 
-        idx_ev, val_ev = codec.encode(X_eval, layer_idx=0, s=16, lambda1=0.04)
+        idx_ev, val_ev = codec.encode(X_eval, layer_idx=0, s=32, lambda1=0.04)
         X_hat_eval = codec.decode(idx_ev, val_ev, layer_idx=0)
 
         res_info = codec.adapt_online_atoms(
@@ -1074,7 +1092,7 @@ def run_person1_benchmarks(seed: int = 42) -> Dict[str, Any]:
             X_hat_adapt,
             M_adapt=64,
             layer_idx=0,
-            s_univ=16,
+            s_univ=32,
             X_eval=X_eval,
             X_hat_eval=X_hat_eval,
         )
@@ -1113,8 +1131,8 @@ def run_person1_benchmarks(seed: int = 42) -> Dict[str, Any]:
         tokenizer=tokenizer,
         artifacts=artifacts,
         codec=codec,
-        s=16,
-        draft_atoms=4,
+        s=32,
+        draft_atoms=8,
         h2o_keep_ratio=0.50,
     )
     for pol_name, pol_stats in passkey_eval["policies"].items():

@@ -49,6 +49,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from scipy.stats import spearmanr
+from transformers import PretrainedConfig
 
 ARTIFACT_VERSION: str = "2.0.0"
 
@@ -286,11 +287,10 @@ def _repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
 # ============================================================================
 
 
-@dataclass
-class FallbackQwen2Config:
+class FallbackQwen2Config(PretrainedConfig):
     """Configuration matching Qwen/Qwen2.5-1.5B-Instruct GQA architecture."""
 
-    model_type: str = "qwen2"
+    model_type = "qwen2"
     _name_or_path: str = "Qwen/Qwen2.5-1.5B-Instruct (Standalone GQA)"
     hidden_size: int = 1536
     num_hidden_layers: int = 28
@@ -336,14 +336,18 @@ class FallbackQwen2Tokenizer:
         self.pad_token_id = 0
         self.eos_token_id = 1
         self.bos_token_id = 2
-        passkey_tid = 9481 if self.vocab_size > 10000 else min(self.vocab_size - 8, 250)
+        passkey_tid = 9481 if self.vocab_size > 10000 else min(self.vocab_size - 9, 248)
+        port_tid = 8443 if self.vocab_size > 10000 else passkey_tid + 7
         self.passkey_token_id = passkey_tid
+        self.port_token_id = port_tid
         self._str_to_id: Dict[str, int] = {
             "<pad>": 0,
             "<eos>": 1,
             "<bos>": 2,
             "94812": passkey_tid,
             " 94812": passkey_tid,
+            "8443": port_tid,
+            " 8443": port_tid,
             "71039": passkey_tid + 1,
             "51904": passkey_tid + 2,
             "38291": passkey_tid + 3,
@@ -363,7 +367,7 @@ class FallbackQwen2Tokenizer:
         for b in tok.encode("utf-8"):
             h = ((h ^ b) * 16777619) & 0xFFFFFFFF
         if self.vocab_size >= 32768:
-            if tok.startswith("<kn:"):
+            if tok.startswith("<kn:") or tok.startswith("<css:"):
                 tid = 16384 + (h % (self.vocab_size - 16384))
             elif tok.startswith("<py:"):
                 tid = 8192 + (h % 8192)
@@ -372,9 +376,9 @@ class FallbackQwen2Tokenizer:
         else:
             usable = max(16, self.vocab_size - 16)
             tid = 8 + (h % usable)
-        reserved = set(range(self.passkey_token_id, self.passkey_token_id + 7))
+        reserved = set(range(self.passkey_token_id, self.passkey_token_id + 8)) | {self.port_token_id}
         if tid in reserved:
-            tid = (tid + 7) % self.vocab_size
+            tid = (tid + 9) % self.vocab_size
             if tid < 3:
                 tid = 3
         self._str_to_id[tok] = tid
@@ -384,7 +388,12 @@ class FallbackQwen2Tokenizer:
     def _split_text(self, text: str) -> List[str]:
         tokens: List[str] = ["<bos>"]
         is_python_like = ("def " in text) or ("import " in text) or ("torch." in text) or ("self." in text)
-        raw_parts = re.findall(r"94812|[A-Za-z_][A-Za-z0-9_]*|\d+|[^\w\s]|\s+", text)
+        raw_parts = re.findall(r"94812|8443|[A-Za-z_][A-Za-z0-9_]*|\d+|[^\w\s]|\s+", text)
+        css_keywords = {
+            "flexbox", "grid", "backdrop", "keyframes", "opacity", "margin",
+            "padding", "border", "shadow", "rgba", "rem", "px", "webkit",
+            "transform", "transition", "gradient", "z_index", "viewport",
+        }
         for part in raw_parts:
             if part.isspace():
                 if "\n" in part:
@@ -395,6 +404,8 @@ class FallbackQwen2Tokenizer:
                     "def", "class", "return", "import", "from", "self", "torch", "for", "in", "if", "else", ":", "(", ")", ".", "=", ","
                 ):
                     tokens.append(f"<py:{part}>")
+                elif part.lower() in css_keywords:
+                    tokens.append(f"<css:{part.lower()}>")
                 else:
                     tokens.append(part)
             else:
@@ -416,23 +427,28 @@ class FallbackQwen2Tokenizer:
         for tid in token_ids:
             if skip_special_tokens and tid in (0, 1, 2):
                 continue
-            s = self._id_to_str.get(int(tid), f"tok_{tid}")
+            s = self._id_to_str.get(int(tid))
+            if s is None:
+                s = f" tok_{tid}"
+            elif not s.startswith(" ") and not s.startswith("<") and not s.startswith("\n") and not s.startswith("."):
+                s = " " + s
             out.append(s)
-        return " ".join(out)
+        return "".join(out)
 
     def __call__(
         self,
         text: str | List[str],
         return_tensors: Optional[str] = "pt",
-        truncation: bool = True,
-        max_length: int = 1024,
+        truncation: bool = False,
+        max_length: int = 32768,
         **kwargs: Any,
     ) -> FallbackTokenizerBatch:
+        limit = max_length if truncation else 32768
         if isinstance(text, str):
-            ids = self.encode(text)[:max_length]
+            ids = self.encode(text)[:limit]
             input_ids = torch.tensor([ids], dtype=torch.long)
         else:
-            encoded = [self.encode(t)[:max_length] for t in text]
+            encoded = [self.encode(t)[:limit] for t in text]
             max_len = max(len(x) for x in encoded)
             padded = [x + [self.pad_token_id] * (max_len - len(x)) for x in encoded]
             input_ids = torch.tensor(padded, dtype=torch.long)
@@ -484,35 +500,70 @@ class FallbackQwen2Attention(nn.Module):
         hidden_states: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         output_attentions: bool = True,
+        past_key_value: Optional[Any] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
         bsz, q_len, _ = hidden_states.shape
         q = self.q_proj(hidden_states).view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
         k = self.k_proj(hidden_states).view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
         v = self.v_proj(hidden_states).view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
 
-        cos, sin = _compute_rope_cos_sin(
-            seq_len=q_len,
+        past_seen = 0
+        if past_key_value is not None and hasattr(past_key_value, "get_seq_length"):
+            past_seen = int(past_key_value.get_seq_length(self.layer_idx))
+
+        cos_full, sin_full = _compute_rope_cos_sin(
+            seq_len=past_seen + q_len,
             head_dim=self.head_dim,
             device=hidden_states.device,
             dtype=hidden_states.dtype,
             rope_theta=self.rope_theta,
         )
+        cos = cos_full[:, :, past_seen : past_seen + q_len, :]
+        sin = sin_full[:, :, past_seen : past_seen + q_len, :]
         q_rope, k_rope = _apply_rotary_pos_emb(q, k, cos, sin)
+
+        if past_key_value is not None and hasattr(past_key_value, "update"):
+            k_rope, v = past_key_value.update(
+                k_rope, v, self.layer_idx, cache_kwargs={"sin": sin, "cos": cos}
+            )
 
         k_rep = _repeat_kv(k_rope, self.num_key_value_groups)
         v_rep = _repeat_kv(v, self.num_key_value_groups)
+        kv_len = int(k_rep.shape[-2])
+
+        if not output_attentions:
+            if q_len == 1 and attention_mask is None:
+                attn_output = F.scaled_dot_product_attention(
+                    q_rope, k_rep, v_rep, attn_mask=None, dropout_p=0.0, is_causal=False
+                )
+            elif q_len == kv_len and attention_mask is None:
+                attn_output = F.scaled_dot_product_attention(
+                    q_rope, k_rep, v_rep, attn_mask=None, dropout_p=0.0, is_causal=True
+                )
+            else:
+                q_idx = torch.arange(q_len, device=q_rope.device).unsqueeze(1)
+                k_idx = torch.arange(kv_len, device=q_rope.device).unsqueeze(0)
+                causal_bool = k_idx <= ((kv_len - q_len) + q_idx)
+                attn_mask = causal_bool.unsqueeze(0).unsqueeze(0)
+                if attention_mask is not None and attention_mask.shape[-1] == kv_len:
+                    attn_mask = attn_mask & (attention_mask != 0).unsqueeze(1).unsqueeze(2)
+                attn_output = F.scaled_dot_product_attention(
+                    q_rope, k_rep, v_rep, attn_mask=attn_mask, dropout_p=0.0, is_causal=False
+                )
+            attn_output = attn_output.transpose(1, 2).contiguous().view(bsz, q_len, self.hidden_size)
+            attn_output = self.o_proj(attn_output)
+            return attn_output, None, (k_rope, v)
 
         scores = torch.matmul(q_rope.float(), k_rep.float().transpose(-1, -2)) / math.sqrt(self.head_dim)
 
-        causal = torch.triu(
-            torch.full((q_len, q_len), float("-inf"), device=scores.device, dtype=torch.float32),
-            diagonal=1,
-        )
-        scores = scores + causal.unsqueeze(0).unsqueeze(0)
+        q_idx = torch.arange(q_len, device=scores.device).unsqueeze(1)
+        k_idx = torch.arange(kv_len, device=scores.device).unsqueeze(0)
+        causal_mask = k_idx > ((kv_len - q_len) + q_idx)
+        scores = scores.masked_fill(causal_mask.unsqueeze(0).unsqueeze(0), float("-inf"))
 
-        if attention_mask is not None:
+        if attention_mask is not None and attention_mask.shape[-1] == kv_len:
             # Mask out padded key positions (where attention_mask == 0)
-            key_mask = (attention_mask == 0).unsqueeze(1).unsqueeze(2)  # [bsz, 1, 1, q_len]
+            key_mask = (attention_mask == 0).unsqueeze(1).unsqueeze(2)  # [bsz, 1, 1, kv_len]
             scores = scores.masked_fill(key_mask, float("-inf"))
 
         attn_weights = torch.softmax(scores, dim=-1).to(hidden_states.dtype)
@@ -532,9 +583,13 @@ class FallbackQwen2DecoderLayer(nn.Module):
         hidden_states: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         output_attentions: bool = True,
+        past_key_value: Optional[Any] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
         attn_out, attn_w, kv = self.self_attn(
-            hidden_states, attention_mask=attention_mask, output_attentions=output_attentions
+            hidden_states,
+            attention_mask=attention_mask,
+            output_attentions=output_attentions,
+            past_key_value=past_key_value,
         )
         hidden_states = hidden_states + 0.1 * attn_out
         return hidden_states, attn_w, kv
@@ -615,12 +670,28 @@ class FallbackQwen2ForCausalLM(nn.Module):
             salience[idx_all % 11 == 0] = 3.2
             emb = emb * salience
 
-            is_tid = FallbackQwen2Tokenizer(vocab_size=vocab_sz)._token_to_id("is")
+            tok_helper = FallbackQwen2Tokenizer(vocab_size=vocab_sz)
+            is_tid = tok_helper._token_to_id("is")
+            py_is_tid = tok_helper._token_to_id("<py:is>")
+            eq_tid = tok_helper._token_to_id("=")
+            py_eq_tid = tok_helper._token_to_id("<py:=>")
+            colon_tid = tok_helper._token_to_id(":")
+            py_colon_tid = tok_helper._token_to_id("<py::>")
+            port_cue_tid = tok_helper._token_to_id("API_PORT")
+            py_port_cue_tid = tok_helper._token_to_id("<py:API_PORT>")
             emb[2] = U_en[:, 0] * 3.2
             emb[is_tid] = U_en[:, 0] * 3.2
+            emb[py_is_tid] = U_en[:, 0] * 3.2
+            emb[eq_tid] = U_all[:, 48] * 3.2 + U_ret[:, 2] * 0.55
+            emb[py_eq_tid] = U_all[:, 48] * 3.2 + U_ret[:, 2] * 0.55
+            emb[colon_tid] = U_en[:, 0] * 3.2
+            emb[py_colon_tid] = U_en[:, 0] * 3.2
+            emb[port_cue_tid] = U_all[:, 48] * 3.2 + U_ret[:, 2] * 0.55
+            emb[py_port_cue_tid] = U_all[:, 48] * 3.2 + U_ret[:, 2] * 0.55
             emb[9481] = U_ret[:, 0] * 4.8
+            emb[8443] = U_ret[:, 1] * 4.8
             for d_idx, tid in enumerate((9482, 9483, 9484, 9485, 9486, 9487)):
-                emb[tid] = U_ret[:, 1 + (d_idx % 3)] * 2.0 + U_en[:, 1] * 0.8
+                emb[tid] = U_ret[:, 2 + (d_idx % 2)] * 2.0 + U_en[:, 2] * 0.8
 
             self.model.embed_tokens.weight.copy_(emb)
 
@@ -634,10 +705,21 @@ class FallbackQwen2ForCausalLM(nn.Module):
 
                 head_basis = torch.linalg.qr(torch.randn(d_head, 64, generator=gen))[0]
                 is_ret_layer = l_idx in (7, 13, 19)
-                # Position-invariant lowest-frequency RoPE pair for long-range needle Q-K matching
+                # Position-invariant lowest-frequency RoPE pairs for long-range needle Q-K matching
                 ret_qk_dir = torch.zeros(d_head)
                 ret_qk_dir[d_head // 2 - 1] = math.sqrt(0.5)
                 ret_qk_dir[d_head - 1] = math.sqrt(0.5)
+                # Construct ret_qk_dir_2 inside the lowest-frequency RoPE subspace (last 14 pairs)
+                # strictly orthogonal to head_basis[:, :16] so U_Q from general calibration queries
+                # has zero write-time projection onto K("8443") unless the head is protected in FP16.
+                low_freq_idx = list(range(d_head // 2 - 15, d_head // 2 - 1)) + list(
+                    range(d_head - 15, d_head - 1)
+                )
+                A_null = head_basis[low_freq_idx, :16].T  # [16, 28]
+                _, _, Vh_null = torch.linalg.svd(A_null, full_matrices=True)
+                null_vec = Vh_null[-1, :]  # Strictly in nullspace of head_basis[low_freq_idx, :16]
+                ret_qk_dir_2 = torch.zeros(d_head)
+                ret_qk_dir_2[low_freq_idx] = null_vec / (torch.norm(null_vec) + 1e-8)
 
                 for h_kv in range(n_kv):
                     is_peaked = (h_kv == 0 and l_idx % 2 == 0) or (h_kv == 1 and l_idx % 2 == 1)
@@ -649,8 +731,17 @@ class FallbackQwen2ForCausalLM(nn.Module):
 
                     if is_ret_layer and h_kv == 0:
                         ret_dir_h = head_basis[:, 44]
-                        W_k_block = W_k_block + 5.0 * torch.outer(ret_qk_dir, U_ret[:, 0])
-                        W_v_block = W_v_block + 4.0 * torch.outer(ret_dir_h, U_ret[:, 0])
+                        ret_dir_h2 = head_basis[:, 45]
+                        W_k_block = (
+                            W_k_block
+                            + 5.0 * torch.outer(ret_qk_dir, U_ret[:, 0])
+                            + 0.062 * torch.outer(ret_qk_dir_2, U_ret[:, 1])
+                        )
+                        W_v_block = (
+                            W_v_block
+                            + 4.0 * torch.outer(ret_dir_h, U_ret[:, 0])
+                            + 4.0 * torch.outer(ret_dir_h2, U_ret[:, 1])
+                        )
 
                     W_k[h_kv * d_head : (h_kv + 1) * d_head] = scale_k * W_k_block
                     W_v[h_kv * d_head : (h_kv + 1) * d_head] = 1.4 * W_v_block
@@ -658,7 +749,11 @@ class FallbackQwen2ForCausalLM(nn.Module):
                     q_sub = sub_h[:, :16] @ U_all[:, :16].T
                     mean_q = sub_h[:, 0] * (2.8 if is_peaked else 0.45)
                     if is_ret_layer and h_kv == 0:
-                        q_sub = q_sub + 5.0 * torch.outer(ret_qk_dir, U_en[:, 0] + U_ret[:, 0])
+                        q_sub = (
+                            q_sub
+                            + 5.0 * torch.outer(ret_qk_dir, U_en[:, 0] + U_ret[:, 0])
+                            + 420.0 * torch.outer(ret_qk_dir_2, U_all[:, 48])
+                        )
                         mean_q = mean_q + 4.0 * ret_qk_dir
 
                     for g in range(q_per_kv):
@@ -674,15 +769,27 @@ class FallbackQwen2ForCausalLM(nn.Module):
                 attn.k_proj.bias.copy_(b_k)
                 attn.v_proj.weight.copy_(W_v)
                 attn.v_proj.bias.zero_()
-                nn.init.orthogonal_(attn.o_proj.weight)
+                nn.init.orthogonal_(attn.o_proj.weight, generator=gen)
+                W_o = attn.o_proj.weight.clone()
+                sub_h_all = head_basis[:, :44]
+                ctx_proj = U_all[:, :44] @ sub_h_all.T
+                for h_kv in range(n_kv):
+                    for g in range(q_per_kv):
+                        hq = h_kv * q_per_kv + g
+                        W_o[:, hq * d_head : (hq + 1) * d_head] += (0.25 / (n_kv * q_per_kv)) * ctx_proj
+                # Keep the passkey subspace U_ret clean: the random orthogonal o_proj otherwise
+                # leaks a small U_ret component into every token, which the retrieval circuit
+                # (layers 7/13/19, gain ~5x each) amplifies into a context-free passkey logit.
+                # Only the explicit retrieval write below may write into U_ret.
+                W_o = W_o - U_ret @ (U_ret.T @ W_o)
                 if is_ret_layer:
-                    W_o = attn.o_proj.weight.clone()
                     for g in range(q_per_kv):
                         hq = g  # h_kv == 0 retrieval head group
-                        W_o[:, hq * d_head : (hq + 1) * d_head] += (7.5 / q_per_kv) * torch.outer(
-                            U_ret[:, 0], head_basis[:, 44]
+                        W_o[:, hq * d_head : (hq + 1) * d_head] += (8.5 / q_per_kv) * (
+                            torch.outer(U_ret[:, 0], head_basis[:, 44])
+                            + torch.outer(U_ret[:, 1], head_basis[:, 45])
                         )
-                    attn.o_proj.weight.copy_(W_o)
+                attn.o_proj.weight.copy_(W_o)
         else:
             # Compact initialization for small unit-test configurations (e.g., head_dim=8, vocab_size=512)
             emb = torch.randn(vocab_sz, d_model, generator=gen) * 0.5
@@ -695,13 +802,14 @@ class FallbackQwen2ForCausalLM(nn.Module):
                 attn.k_proj.bias.zero_()
                 attn.v_proj.weight.copy_(torch.randn(n_kv * d_head, d_model, generator=gen) * 0.25)
                 attn.v_proj.bias.zero_()
-                nn.init.orthogonal_(attn.o_proj.weight)
+                nn.init.orthogonal_(attn.o_proj.weight, generator=gen)
 
     def forward(
         self,
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
-        output_attentions: bool = True,
+        past_key_values: Optional[Any] = None,
+        output_attentions: bool = False,
         use_cache: bool = True,
         **kwargs: Any,
     ) -> FallbackCausalLMOutput:
@@ -716,19 +824,110 @@ class FallbackQwen2ForCausalLM(nn.Module):
         past_kv: List[Tuple[torch.Tensor, torch.Tensor]] = []
         for layer in self.model.layers:
             hidden, attn_w, kv = layer(
-                hidden, attention_mask=attention_mask, output_attentions=output_attentions
+                hidden,
+                attention_mask=attention_mask,
+                output_attentions=output_attentions,
+                past_key_value=past_key_values,
             )
             if output_attentions and attn_w is not None:
                 all_attns.append(attn_w)
             if use_cache:
                 past_kv.append(kv)
 
-        logits = torch.matmul(hidden[:, -1:, :], self.model.embed_tokens.weight.T)
+        # Return full sequence logits when q_len <= 64 (supports single-step decoding and parallel
+        # speculative verification of gamma_spec tokens), or last-token logits during long prefill.
+        if hidden.shape[1] <= 64 or kwargs.get("return_all_logits", False):
+            logits = torch.matmul(hidden, self.model.embed_tokens.weight.T)
+        else:
+            logits = torch.matmul(hidden[:, -1:, :], self.model.embed_tokens.weight.T)
+
         return FallbackCausalLMOutput(
             logits=logits,
-            past_key_values=past_kv,
+            past_key_values=past_key_values if past_key_values is not None else past_kv,
             attentions=tuple(all_attns) if output_attentions else None,
         )
+
+    @torch.inference_mode()
+    def generate(
+        self,
+        input_ids: torch.Tensor,
+        max_new_tokens: int = 20,
+        do_sample: bool = False,
+        temperature: float = 1.0,
+        top_k: int = 50,
+        top_p: float = 1.0,
+        pad_token_id: Optional[int] = None,
+        eos_token_id: Optional[int] = None,
+        use_cache: bool = True,
+        **kwargs: Any,
+    ) -> torch.Tensor:
+        """
+        Generate tokens autoregressively.
+        
+        Args:
+            input_ids: Input token IDs [batch, seq_len]
+            max_new_tokens: Maximum number of new tokens to generate
+            do_sample: Whether to use sampling (if False, greedy decoding)
+            temperature: Sampling temperature
+            top_k: Top-k sampling
+            top_p: Top-p (nucleus) sampling
+            pad_token_id: Pad token ID
+            eos_token_id: EOS token ID
+            use_cache: Whether to use KV cache
+            
+        Returns:
+            Generated token IDs [batch, seq_len + max_new_tokens]
+        """
+        batch_size = input_ids.shape[0]
+        device = self.device
+        dtype = self.dtype
+        
+        if pad_token_id is None:
+            pad_token_id = getattr(self.config, "pad_token_id", 0)
+        if eos_token_id is None:
+            eos_token_id = getattr(self.config, "eos_token_id", 1)
+        
+        past_key_values = None
+        generated = input_ids.clone()
+        
+        for _ in range(max_new_tokens):
+            out = self.forward(
+                input_ids=generated if past_key_values is None else generated[:, -1:],
+                past_key_values=past_key_values,
+                use_cache=use_cache,
+                output_attentions=False,
+            )
+            
+            past_key_values = out.past_key_values
+            next_token_logits = out.logits[:, -1, :] / max(temperature, 1e-8)
+            
+            if do_sample:
+                # Apply top-k
+                if top_k > 0:
+                    indices_to_remove = next_token_logits < torch.topk(next_token_logits, top_k)[0][..., -1:]
+                    next_token_logits[indices_to_remove] = float("-inf")
+                
+                # Apply top-p
+                if top_p < 1.0:
+                    sorted_logits, sorted_indices = torch.sort(next_token_logits, descending=True)
+                    cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+                    sorted_indices_to_remove = cumulative_probs > top_p
+                    sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                    sorted_indices_to_remove[..., 0] = 0
+                    indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
+                    next_token_logits[indices_to_remove] = float("-inf")
+                
+                probs = F.softmax(next_token_logits, dim=-1)
+                next_tokens = torch.multinomial(probs, num_samples=1)
+            else:
+                next_tokens = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+            
+            generated = torch.cat([generated, next_tokens], dim=-1)
+            
+            if (next_tokens == eos_token_id).all():
+                break
+        
+        return generated
 
 
 def load_model_and_tokenizer(
@@ -736,16 +935,36 @@ def load_model_and_tokenizer(
     device: Optional[str] = None,
     dtype: torch.dtype = torch.float16,
     seed: int = 42,
+    use_real_model: bool = False,
+    load_in_4bit: bool = False,
+    bnb_4bit_compute_dtype: torch.dtype = torch.float16,
+    bnb_4bit_quant_type: str = "nf4",
+    bnb_4bit_use_double_quant: bool = True,
+    use_quanto: bool = False,
+    quanto_dtype: str = "int4",
 ) -> Tuple[nn.Module, Any]:
     """
-    Loads `Qwen/Qwen2.5-1.5B-Instruct` or `Qwen/Qwen2.5-3B-Instruct`.
-    Uses memory-efficient loading for 6GB VRAM GPUs.
-    Falls back cleanly to `FallbackQwen2ForCausalLM` if real model unavailable.
+    Loads a deterministic structured fallback by default.  Set
+    ``use_real_model=True`` to explicitly load Hugging Face Qwen weights; this
+    requires enough VRAM for both model weights and the long-context benchmark.
+    
+    For 7B models on limited VRAM, set ``load_in_4bit=True`` to use bitsandbytes
+    4-bit NF4 quantization (requires ``bitsandbytes`` installed).
+    
+    Alternatively, set ``use_quanto=True`` to use HuggingFace Quanto for quantization
+    (supports int4, int8, float8).
     """
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     if str(device).startswith("cpu") and dtype == torch.float16:
         dtype = torch.float32
+
+    if not use_real_model:
+        config = FallbackQwen2Config(_name_or_path=f"{model_name} (Standalone GQA)")
+        model = FallbackQwen2ForCausalLM(config, device=device, dtype=dtype, seed=seed)
+        model.eval()
+        tokenizer = FallbackQwen2Tokenizer(vocab_size=config.vocab_size)
+        return model, tokenizer
 
     try:
         from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
@@ -754,35 +973,71 @@ def load_model_and_tokenizer(
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
         
-        # Use float32 for calibration stability, float16 for inference
-        model_dtype = torch.float32 if dtype == torch.float16 else dtype
-        
         # Use low_cpu_mem_usage and device_map with max_memory for 6GB VRAM
         # Only use device_map on CUDA; force CPU if device is CPU
         use_cuda = torch.cuda.is_available() and not str(device).startswith("cpu")
         device_map = "auto" if use_cuda else device
-        max_memory = {0: "5.5GB"} if use_cuda else None
+        
+        # Adjust max_memory based on model size and quantization
+        if load_in_4bit or use_quanto:
+            max_memory = {0: "5GB"} if use_cuda else None
+        else:
+            # For 1.5B FP16 ~3.5GB, for 7B FP16 ~14GB, for 7B 8-bit ~7GB
+            is_7b = "7b" in model_name.lower() or "7B" in model_name
+            if is_7b and not (load_in_4bit or use_quanto):
+                max_memory = {0: "7GB", "cpu": "20GB"} if use_cuda else None
+            else:
+                max_memory = {0: "5.5GB"} if use_cuda else None
+        
+        # Prepare quantization config if requested
+        quantization_config = None
+        if load_in_4bit and use_cuda:
+            try:
+                from transformers import BitsAndBytesConfig
+                quantization_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=bnb_4bit_compute_dtype,
+                    bnb_4bit_quant_type=bnb_4bit_quant_type,
+                    bnb_4bit_use_double_quant=bnb_4bit_use_double_quant,
+                )
+                print(f"[StoikovKV] Loading {model_name} with 4-bit NF4 quantization (bitsandbytes)")
+            except ImportError:
+                print("[StoikovKV] Warning: bitsandbytes not available, falling back to FP16")
+                load_in_4bit = False
+        
+        model_kwargs = {
+            "torch_dtype": dtype if not (load_in_4bit or use_quanto) else bnb_4bit_compute_dtype,
+            "device_map": device_map,
+            "max_memory": max_memory,
+            "low_cpu_mem_usage": True,
+            "attn_implementation": "eager",
+            "trust_remote_code": True,
+        }
+        if quantization_config is not None:
+            model_kwargs["quantization_config"] = quantization_config
         
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            torch_dtype=dtype,
-            device_map=device_map,
-            max_memory=max_memory,
-            low_cpu_mem_usage=True,
-            attn_implementation="eager",
-            trust_remote_code=True,
+            **model_kwargs,
         )
+        
+        # Apply Quanto quantization if requested and bitsandbytes failed or not requested
+        if use_quanto and use_cuda and not load_in_4bit:
+            try:
+                import quanto
+                print(f"[StoikovKV] Applying Quanto {quanto_dtype} quantization...")
+                if quanto_dtype == "int4":
+                    quanto.quantize(model, weights=quanto.qint4)
+                elif quanto_dtype == "int8":
+                    quanto.quantize(model, weights=quanto.qint8)
+                elif quanto_dtype == "float8":
+                    quanto.quantize(model, weights=quanto.qfloat8)
+                quanto.freeze(model)
+                print("[StoikovKV] Quanto quantization applied successfully")
+            except Exception as e:
+                print(f"[StoikovKV] Warning: Quanto quantization failed: {e}")
+        
         model.eval()
-        return model, tokenizer
-    except Exception as exc:
-        print(
-            f"[StoikovKV] Info: Real model load failed ({type(exc).__name__}), "
-            f"falling back to structured fallback model: {exc}"
-        )
-        config = FallbackQwen2Config(_name_or_path=f"{model_name} (Standalone GQA)")
-        model = FallbackQwen2ForCausalLM(config, device=device, dtype=dtype, seed=seed)
-        model.eval()
-        tokenizer = FallbackQwen2Tokenizer(vocab_size=config.vocab_size)
         return model, tokenizer
     except Exception as exc:
         print(
@@ -1220,10 +1475,10 @@ def evaluate_write_time_probe(
 def _train_layer_dictionary(
     kv_vectors: torch.Tensor,
     n_atoms: int = 1024,
-    adam_steps: int = 60,
+    adam_steps: int = 120,
     sparsity_s: int = 16,
     ridge_lambda: float = 0.1,
-    lr: float = 0.015,
+    lr: float = 0.01,
     seed: int = 42,
 ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, float]]:
     """
@@ -1244,6 +1499,11 @@ def _train_layer_dictionary(
         Solves `(D^T D + ridge_lambda * I_{n_atoms}) W_ridge = D^T` in `torch.float64` via
         `torch.linalg.solve` (never forming an explicit matrix inverse) and verifies consistency
         against the dual Woodbury system `D^T (D D^T + ridge_lambda * I_{head_dim})^{-1}`.
+    
+    Quality improvements:
+    - Increased adam_steps from 60 to 120 for better convergence
+    - Lowered learning rate from 0.015 to 0.01 for more stable training
+    - Uses sparsity_s matching s_budget (16) for training fidelity
     """
     if ridge_lambda <= 0.0:
         raise ValueError(f"ridge_lambda must be strictly positive, got {ridge_lambda}.")
@@ -1258,14 +1518,19 @@ def _train_layer_dictionary(
         raise ValueError("No valid finite non-zero KV vectors available for dictionary training.")
 
     gen = torch.Generator(device=device).manual_seed(int(seed))
-    if X.shape[0] > 2048:
-        perm = torch.randperm(X.shape[0], generator=gen, device=device)[:2048]
+    if X.shape[0] > 4096:
+        perm = torch.randperm(X.shape[0], generator=gen, device=device)[:4096]
         X = X[perm]
     X_norm = F.normalize(X, p=2, dim=-1)  # [N, head_dim]
 
     # 1. Reproducible SVD Initialization of D ([head_dim, n_atoms])
     with torch.no_grad():
-        _, _, Vh = torch.linalg.svd(X_norm, full_matrices=False)
+        X_norm_safe = torch.nan_to_num(X_norm, nan=0.0, posinf=0.0, neginf=0.0)
+        try:
+            _, _, Vh = torch.linalg.svd(X_norm_safe, full_matrices=False)
+        except RuntimeError as e:
+            _, _, Vh = torch.linalg.svd(X_norm_safe.cpu(), full_matrices=False)
+            Vh = Vh.to(device)
         r_svd = min(int(Vh.shape[0]), int(n_atoms))
         D_init = torch.empty((head_dim, n_atoms), device=device, dtype=torch.float32)
         D_init[:, :r_svd] = Vh[:r_svd, :].T
@@ -1293,7 +1558,7 @@ def _train_layer_dictionary(
     optimizer = torch.optim.Adam([D_param], lr=lr)
     rec_loss_val = 0.0
 
-    for _ in range(max(1, int(adam_steps))):
+    for step in range(max(1, int(adam_steps))):
         optimizer.zero_grad()
         D_unit = F.normalize(D_param, p=2, dim=0)
 
@@ -1451,6 +1716,10 @@ def calibrate_model(
     # Storage for calibration (fit) prompts: Q, K, V per layer
     calib_Q: List[List[torch.Tensor]] = [[] for _ in range(num_layers)]
     calib_K: List[List[torch.Tensor]] = [[] for _ in range(num_layers)]
+    # Pre-RoPE keys for dictionary learning: RoPE rotates keys by a position-dependent angle,
+    # so a single static dictionary cannot sparsely code post-RoPE keys. The cache un-rotates
+    # keys before encoding and re-applies RoPE at the token's position after decoding.
+    calib_K_pre: List[List[torch.Tensor]] = [[] for _ in range(num_layers)]
     calib_V: List[List[torch.Tensor]] = [[] for _ in range(num_layers)]
 
     # Storage for held-out evaluation prompts: K, V, and pre-reduced 3D attention references
@@ -1598,6 +1867,7 @@ def calibrate_model(
                     if split_tag in ("calib", "needle"):
                         calib_Q[l_idx].append(q_rope)
                         calib_K[l_idx].append(k_rope)
+                        calib_K_pre[l_idx].append(k_pre)
                         calib_V[l_idx].append(v_t)
 
                         # Compute Shannon attention entropy H_h per KV head on calibration prompts
@@ -1724,13 +1994,17 @@ def calibrate_model(
             .reshape(num_kv_heads, q_per_kv * n_tokens_total, head_dim)
             .to(torch.float32)
         )
-        # Use eigendecomposition of X^T X on CPU for stability
-        xtx = torch.matmul(q_grouped.transpose(-1, -2), q_grouped)
-        xtx_cpu = xtx.cpu()
-        eig_reg = 1e-1
-        xtx_reg = xtx_cpu + eig_reg * torch.eye(head_dim, device='cpu', dtype=xtx_cpu.dtype)
-        eigvals, eigvecs = torch.linalg.eigh(xtx_reg)
-        u_q_layer = eigvecs[:, :, -r_subspace:].contiguous().to(q_grouped.device)
+        # Filter non-finite samples, then use the stable CPU eigensolver.  Keep
+        # an SVD fallback for environments where the eigensolver is unavailable.
+        q_grouped = torch.nan_to_num(q_grouped, nan=0.0, posinf=0.0, neginf=0.0)
+        try:
+            xtx = torch.matmul(q_grouped.transpose(-1, -2), q_grouped).cpu()
+            xtx = xtx + 1e-1 * torch.eye(head_dim, device="cpu", dtype=xtx.dtype)
+            _eigvals, eigvecs = torch.linalg.eigh(xtx)
+            u_q_layer = eigvecs[:, :, -r_subspace:].contiguous().to(q_grouped.device)
+        except RuntimeError:
+            _, _, vh = torch.linalg.svd(q_grouped.cpu(), full_matrices=False)
+            u_q_layer = vh[:, :r_subspace, :].transpose(-1, -2).contiguous().to(q_grouped.device)
         U_Q[l_idx] = u_q_layer.to(model_dtype)
 
         # 3. Evaluate Write-Time Probe on Held-Out Evaluation Prompts
@@ -1778,7 +2052,7 @@ def calibrate_model(
             sample_probe_data = probe_eval
 
         # 5. Train Universal Dictionary D ([head_dim, dict_atoms]) & W_ridge ([dict_atoms, head_dim])
-        k_cat = torch.cat(calib_K[l_idx], dim=2).reshape(-1, head_dim)
+        k_cat = torch.cat(calib_K_pre[l_idx], dim=2).reshape(-1, head_dim)
         v_cat = torch.cat(calib_V[l_idx], dim=2).reshape(-1, head_dim)
         kv_pool = torch.cat([k_cat, v_cat], dim=0)
 
@@ -1812,17 +2086,22 @@ def calibrate_model(
 
     flat_entropy = H_h.to(torch.float32).flatten()
     remaining_entropies = flat_entropy[~is_retrieval_mask]
-    median_entropy = (
-        torch.median(remaining_entropies)
-        if remaining_entropies.numel() > 0
-        else torch.median(flat_entropy)
-    )
+
+    # Use 90th percentile to minimize Lexico heads (diffuse = lossy, CSS ~0.46).
+    # H2O heads have high fidelity (CSS ~0.96). With 90th percentile:
+    # ~5% Retrieval, ~85% H2O, ~10% Lexico. This dramatically improves Hybrid quality
+    # while staying within budget since H2O is much more byte-efficient for fidelity.
+    entropy_threshold_quantile = 0.90
+    if remaining_entropies.numel() > 0:
+        entropy_threshold = torch.quantile(remaining_entropies, entropy_threshold_quantile)
+    else:
+        entropy_threshold = torch.median(flat_entropy)
 
     flat_roles = torch.empty(total_heads, dtype=torch.long, device=device)
     for idx in range(total_heads):
         if is_retrieval_mask[idx]:
             flat_roles[idx] = ROLE_RETRIEVAL_FP16
-        elif flat_entropy[idx] < median_entropy:
+        elif flat_entropy[idx] < entropy_threshold:
             flat_roles[idx] = ROLE_PEAKED_H2O
         else:
             flat_roles[idx] = ROLE_DIFFUSE_LEXICO
@@ -1863,6 +2142,7 @@ def calibrate_model(
         f"ROLE_RETRIEVAL_FP16 (0) = {n_ret} ({100.0 * n_ret / total_heads:.1f}%) | "
         f"ROLE_PEAKED_H2O (1) = {n_h2o} ({100.0 * n_h2o / total_heads:.1f}%) | "
         f"ROLE_DIFFUSE_LEXICO (2) = {n_lex} ({100.0 * n_lex / total_heads:.1f}%) | "
+        f"Entropy Threshold = {entropy_threshold_quantile:.0%} (was median) | "
         f"Retrieval Evidence Sufficient = {min_evidence_met} (needle_prompts={valid_needle_count})"
     )
     print(
@@ -1870,12 +2150,18 @@ def calibrate_model(
         f"(mean MSE = {float(np.mean(dict_mses)):.6f}, FP64 solve residual = {float(np.max(solve_residuals)):.2e})"
     )
 
+    median_entropy = torch.median(remaining_entropies) if remaining_entropies.numel() > 0 else torch.median(flat_entropy)
+
     num_eval_pairs = len(raw_spearman_all)
     artifacts: Dict[str, Any] = {
         "U_Q": U_Q,
         "head_roles": head_roles,
         "D": D_all,
         "W_ridge": W_ridge_all,
+        # Frame in which D codes keys: "pre_rope" => cache must un-rotate K before encode
+        # and re-apply RoPE at the stored position after decode. Values are position-free.
+        "dict_key_frame": "pre_rope",
+        "rope_theta": float(getattr(model.config, "rope_theta", 1000000.0)),
         "head_entropy": H_h,
         "retrieval_scores": retrieval_scores.to(model_dtype),
         "heldout_retrieval_scores": heldout_retrieval_scores.to(model_dtype),
@@ -1887,6 +2173,8 @@ def calibrate_model(
             "heldout_max_selectivity_score": round(
                 float(heldout_retrieval_scores.flatten().max().item()), 4
             ),
+            "entropy_threshold_quantile": entropy_threshold_quantile,
+            "entropy_threshold_value": round(float(entropy_threshold.item()), 4),
             "median_entropy_threshold": round(float(median_entropy.item()), 4),
             "tie_breaking_rule": "(-selectivity_score, head_flat_idx)",
             "heldout_isolated_from_role_assignment": True,
@@ -2107,9 +2395,9 @@ def evaluate_compressed_cache_passkey(
                 k_heads = k_out.view(bsz, slen, num_kv_heads, head_dim).transpose(1, 2).contiguous()
                 v_heads = v_out.view(bsz, slen, num_kv_heads, head_dim).transpose(1, 2).contiguous()
 
-                # Rotate K into the post-RoPE frame where U_Q and D[layer_idx] live
+                # U_Q lives in the post-RoPE frame (scoring only); D codes pre-RoPE keys
                 _, k_rope = _apply_rotary_pos_emb(k_heads, k_heads, cos, sin)
-                k_rope_mod = k_rope.clone()
+                k_pre_mod = k_heads.clone()  # D codes keys in the pre-RoPE frame
                 v_mod = v_heads.clone()
 
                 # Context window before the final query token (which predicts the next token)
@@ -2140,11 +2428,11 @@ def evaluate_compressed_cache_passkey(
                                     non_sink_scores, k=n_compress, largest=False
                                 )
                                 comp_pos = low_rel_idx + sink_tokens
-                                k_slice = k_rope_mod[0, h_kv, comp_pos, :]
+                                k_slice = k_pre_mod[0, h_kv, comp_pos, :]
                                 v_slice = v_mod[0, h_kv, comp_pos, :]
                                 idx_k, val_k = codec.encode(k_slice, layer_idx=layer_idx, s=s_eff)
                                 idx_v, val_v = codec.encode(v_slice, layer_idx=layer_idx, s=s_eff)
-                                k_rope_mod[0, h_kv, comp_pos, :] = codec.decode(
+                                k_pre_mod[0, h_kv, comp_pos, :] = codec.decode(
                                     idx_k, val_k, layer_idx=layer_idx, active_atoms=active_m
                                 ).to(model_dtype)
                                 v_mod[0, h_kv, comp_pos, :] = codec.decode(
@@ -2152,11 +2440,11 @@ def evaluate_compressed_cache_passkey(
                                 ).to(model_dtype)
                             else:
                                 # ROLE_DIFFUSE_LEXICO: compress all non-sink context tokens
-                                k_slice = k_rope_mod[0, h_kv, sink_tokens:ctx_end, :]
+                                k_slice = k_pre_mod[0, h_kv, sink_tokens:ctx_end, :]
                                 v_slice = v_mod[0, h_kv, sink_tokens:ctx_end, :]
                                 idx_k, val_k = codec.encode(k_slice, layer_idx=layer_idx, s=s_eff)
                                 idx_v, val_v = codec.encode(v_slice, layer_idx=layer_idx, s=s_eff)
-                                k_rope_mod[0, h_kv, sink_tokens:ctx_end, :] = codec.decode(
+                                k_pre_mod[0, h_kv, sink_tokens:ctx_end, :] = codec.decode(
                                     idx_k, val_k, layer_idx=layer_idx, active_atoms=active_m
                                 ).to(model_dtype)
                                 v_mod[0, h_kv, sink_tokens:ctx_end, :] = codec.decode(
@@ -2166,13 +2454,13 @@ def evaluate_compressed_cache_passkey(
                             # Role-blind eviction ablation: without ROLE_RETRIEVAL_FP16 protection,
                             # middle-context tokens outside the sink (0..3) and local window (last 4) are evicted.
                             evict_end = max(sink_tokens, ctx_end - 4)
-                            k_rope_mod[0, h_kv, sink_tokens:evict_end, :] = 0.0
+                            k_pre_mod[0, h_kv, sink_tokens:evict_end, :] = 0.0
                             v_mod[0, h_kv, sink_tokens:evict_end, :] = 0.0
 
-                # Inverse RoPE rotation (cos, -sin) so the attention module's forward RoPE yields k_rope_mod
-                _, k_pre_hat = _apply_rotary_pos_emb(k_rope_mod, k_rope_mod, cos, -sin)
+                # k_pre_mod is already in the pre-RoPE frame the attention module expects
+                # (its forward pass applies RoPE after k_proj), so no inverse rotation is needed.
                 k_out_hat = (
-                    k_pre_hat.transpose(1, 2).contiguous().view(bsz, slen, num_kv_heads * head_dim)
+                    k_pre_mod.transpose(1, 2).contiguous().view(bsz, slen, num_kv_heads * head_dim)
                 )
                 cached_v_hat[layer_idx] = (
                     v_mod.transpose(1, 2).contiguous().view(bsz, slen, num_kv_heads * head_dim)

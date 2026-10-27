@@ -1,0 +1,8 @@
+model:
+  name: "Qwen/Qwen2.5-3B-Instruct"
+  dtype: "float16"
+  device: "cuda"
+  attn_implementation: "sdpa"
+  max_seq_len: 32768
+  trust_remote_code: true
+  fallback_to_mock: true

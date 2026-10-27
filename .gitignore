@@ -13,3 +13,12 @@ stoikovkv_master_implementation_prompts (1).md
 
 # Large generated PyTorch binary artifacts (regenerated via calibrate_model / bench_person1.py)
 *.pt
+
+# Frontend build & dependencies
+node_modules/
+.next/
+frontend/node_modules/
+frontend/.next/
+frontend.zip
+*.tsbuildinfo
+frontend/*.tsbuildinfo
