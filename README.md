@@ -4,7 +4,21 @@
 
 ---
 
-## 🎯 Results (Qwen2.5-1.5B-Instruct, RTX 4050)
+## 🎯 **New: Qwen2.5-7B-Instruct on 8GB VRAM** (Real Model)
+
+| Configuration | Needle Retrieval | Memory % | Compression | Tokens/sec | Peak VRAM |
+|---------------|-----------------|----------|-------------|------------|-----------|
+| **Full FP16 (real 7B)** | ❌ FAIL | 100% | 1.0× | 0.8 tok/s | 6.9 GB |
+| **StoikovKV Hybrid (real 7B)** | ❌ FAIL | **33-41%** | **2.4-3.0×** | 0.7-0.8 tok/s | 6.9 GB |
+| **Standalone H2O (real 7B)** | ❌ FAIL | **28-36%** | **2.8-3.6×** | 0.8 tok/s | 6.9 GB |
+
+> **Key Finding**: Real 7B loads on 8GB (5.75 GB + CPU offload) but calibration quality degrades (Spearman ρ = -0.022) due to VRAM limits → only 6 retrieval heads vs ~20 needed → retrieval fails. Memory savings **32-67%** work but retrieval fails.
+
+> **Root Cause**: 8GB VRAM insufficient for real 7B calibration → forced reduced prompts/seq_len → poor probe correlation → insufficient retrieval heads.
+
+---
+
+## 🎯 Results (Qwen2.5-1.5B-Instruct, RTX 4060 8GB)
 
 | Configuration | Needle Retrieval | Physical Storage | Compression | Logit Cosine |
 |---------------|-----------------|------------------|-------------|--------------|
@@ -96,6 +110,40 @@ print(result["text"])
 
 ---
 
+## 🔬 **New: 7B GPU Validation** (Qwen2.5-7B, 8GB RTX 4060)
+
+| Aspect | Fallback (1.5B) | Real 7B (FP16 + CPU offload) |
+|--------|-----------------|------------------------------|
+| **Model** | 12L, 4 KV heads, h=64 | 28L, 4 KV heads, h=128 |
+| **Calibration** | ✅ Full (ρ=0.546) | ⚠️ Reduced (ρ=-0.022) |
+| **Needle Retrieval** | ✅ 100% | ❌ FAILS (ρ=-0.022) |
+| **Throughput** | **1,007 tok/s** | **0.8 tok/s** |
+| **Peak VRAM** | **0.38 GB** | **6.9 GB** |
+| **Hybrid Memory** | 19.8% (80% savings) | **33-41%** (59-67% savings) |
+| **Retrieval Heads** | 2 (4.2%) | 6 (5.4%) |
+
+> **Why 7B retrieval fails**: 8GB VRAM forces reduced calibration (3 prompts, seq_len=64) → probe correlation ρ=-0.022 → only 6 retrieval heads vs ~20 needed → recall collapses.
+
+### Real 7B Memory Savings (Hybrid Policy)
+
+| Context | Full FP16 | Hybrid | Savings |
+|---------|-----------|--------|---------|
+| 28 MB (Early) | 100% | 39.9% | **60.1%** |
+| 32 MB (Middle) | 100% | 36.9% | **63.1%** |
+| 40 MB (Late) | 100% | 32.7% | **67.3%** |
+
+> **Memory savings work** (32-67% reduction) but **retrieval fails** due to poor calibration.
+
+### Hardware Requirements for Real 7B
+
+| Config | Min VRAM | Notes |
+|--------|----------|-------|
+| 7B FP16 + full calibration | **16 GB** | No offloading |
+| 7B FP16 + reduced calibration | **12 GB** | Minimum viable |
+| 7B 4-bit (working) | **8 GB** | Need custom CUDA kernels |
+
+---
+
 ## 🔬 Benchmarks
 
 | Benchmark | Command | Description |
@@ -133,6 +181,14 @@ StoikovKV/
 │   ├── bench_person1.py    # Full calibration + codec + passkey eval
 │   ├── bench_person2.py    # Legacy needle benchmark
 │   └── bench_context_switch.py  # Multi-topic context switching
+├── experiments/
+│   └── 7b_gpu_validation/  # Real 7B validation (NEW)
+│       ├── calibrate_7b_real.py      # Memory-optimized calibration
+│       ├── bench_7b_stoikovkv.py     # Real 7B policy evaluation
+│       ├── bench_7b_baseline.py      # FP16 baseline
+│       ├── bench_wikitext.py         # WikiText-103 evaluation
+│       ├── COMPLETE_EXPERIMENT_RESULTS.md  # All results in one file
+│       └── calibrated_artifacts_7b_real.pt
 ├── tests/
 │   └── test_person1_pipeline.py  # 11 unit tests (all pass)
 ├── server/
