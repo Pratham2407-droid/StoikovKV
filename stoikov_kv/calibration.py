@@ -1853,9 +1853,9 @@ def calibrate_model(
                             heldout_needle_count += 1
 
 if split_tag in ("calib", "needle"):
-                        total_entropy_prompts += 1
+                            total_entropy_prompts += 1
 
-                    for l_idx in range(num_layers):
+                        for l_idx in range(num_layers):
                         q_pre = current_q[l_idx]
                         k_pre = current_k[l_idx]
                         v_t = current_v[l_idx]
