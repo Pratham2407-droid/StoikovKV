@@ -1852,34 +1852,42 @@ def calibrate_model(
                         else:
                             heldout_needle_count += 1
 
-                if split_tag in ("calib", "needle"):
-                    total_entropy_prompts += 1
+if split_tag in ("calib", "needle"):
+                        total_entropy_prompts += 1
 
-                for l_idx in range(num_layers):
-                    q_pre = current_q[l_idx]
-                    k_pre = current_k[l_idx]
-                    v_t = current_v[l_idx]
+                    for l_idx in range(num_layers):
+                        q_pre = current_q[l_idx]
+                        k_pre = current_k[l_idx]
+                        v_t = current_v[l_idx]
 
-                    # Apply consistent RoPE to Q and K so U_Q and K share the exact post-RoPE inner-product frame
-                    q_rope, k_rope = _apply_rotary_pos_emb(q_pre, k_pre, cos, sin)
-                    attn_t = attentions[l_idx].detach()  # [1, num_q_heads, seq_len, seq_len]
+                        # Apply consistent RoPE to Q and K so U_Q and K share the exact post-RoPE inner-product frame
+                        q_rope, k_rope = _apply_rotary_pos_emb(q_pre, k_pre, cos, sin)
+                        attn_t = attentions[l_idx].detach()  # [1, num_q_heads, seq_len, seq_len]
 
-                    if split_tag in ("calib", "needle"):
-                        calib_Q[l_idx].append(q_rope)
-                        calib_K[l_idx].append(k_rope)
-                        calib_K_pre[l_idx].append(k_pre)
-                        calib_V[l_idx].append(v_t)
+                        if split_tag in ("calib", "needle"):
+                            calib_Q[l_idx].append(q_rope)
+                            calib_K[l_idx].append(k_rope)
+                            calib_K_pre[l_idx].append(k_pre)
+                            calib_V[l_idx].append(v_t)
 
-                        # Compute Shannon attention entropy H_h per KV head on calibration prompts
-                        attn_fp32 = attn_t.to(torch.float32).clamp(min=1e-9)
-                        token_ent = -(attn_fp32 * attn_fp32.log()).sum(dim=-1)
-                        valid_ent = (
-                            token_ent[:, :, 2:].mean(dim=-1)
-                            if token_ent.shape[-1] > 2
-                            else token_ent.mean(dim=-1)
-                        )
-                        kv_ent = valid_ent.view(1, num_kv_heads, q_per_kv).mean(dim=-1).squeeze(0)
-                        entropy_accum[l_idx] += kv_ent
+                            # Compute Shannon attention entropy H_h per KV head on calibration prompts
+                            # Robust numerical stability: clamp to [eps, 1-eps] to avoid log(0) and log(1)
+                            eps = 1e-7
+                            attn_fp32 = attn_t.to(torch.float32).clamp(min=eps, max=1.0 - eps)
+                            # Renormalize to ensure valid probability distribution
+                            attn_fp32 = attn_fp32 / attn_fp32.sum(dim=-1, keepdim=True).clamp(min=eps)
+                            token_ent = -(attn_fp32 * attn_fp32.log()).sum(dim=-1)
+                            # Replace any non-finite with 0
+                            token_ent = torch.nan_to_num(token_ent, nan=0.0, posinf=0.0, neginf=0.0)
+                            valid_ent = (
+                                token_ent[:, :, 2:].mean(dim=-1)
+                                if token_ent.shape[-1] > 2
+                                else token_ent.mean(dim=-1)
+                            )
+                            kv_ent = valid_ent.view(1, num_kv_heads, q_per_kv).mean(dim=-1).squeeze(0)
+                            # Final safety check
+                            kv_ent = torch.nan_to_num(kv_ent, nan=0.0, posinf=0.0, neginf=0.0)
+                            entropy_accum[l_idx] += kv_ent
                     else:
                         # Held-out split: immediately reduce 4D attention to 3D per-key reference and discard 4D tensor
                         ref_norm = reduce_attention_to_kv_heads(
