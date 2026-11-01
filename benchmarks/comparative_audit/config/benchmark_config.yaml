@@ -1,0 +1,248 @@
+# StoikovKV Comparative Audit Benchmark Configuration
+# ====================================================
+
+# Model Configuration
+model:
+  # Track A: Primary feasible model (fallback)
+  fallback:
+    name: "Qwen/Qwen2.5-1.5B-Instruct (Standalone GQA)"
+    config:
+      hidden_size: 1536
+      num_hidden_layers: 28
+      num_attention_heads: 12
+      num_key_value_heads: 2
+      head_dim: 128
+      vocab_size: 32768
+      rope_theta: 1000000.0
+    dtype: "float16"
+    device: "cuda"
+  
+  # Track B: Real 7B model
+  real_7b:
+    name: "Qwen/Qwen2.5-7B-Instruct"
+    dtype: "float16"
+    device: "cuda"
+    quantization:
+      enabled: false
+      method: "bitsandbytes"  # or "quanto"
+      bits: 4
+      compute_dtype: "float16"
+    cpu_offload: true
+    max_gpu_memory: "7GB"
+
+# Benchmark Parameters
+benchmark:
+  # Context lengths to test (tokens)
+  context_lengths: [512, 2048, 4096]
+  
+  # Generation lengths
+  generation_lengths: [32, 64, 128]
+  
+  # Memory budgets as fraction of FP16 reference
+  memory_budgets: [0.25, 0.40, 0.60, 0.80]
+  
+  # Number of trials for stochastic experiments
+  num_trials: 3
+  
+  # Random seeds for reproducibility
+  seeds: [42, 123, 456]
+  
+  # Warmup iterations
+  warmup_iterations: 3
+  
+  # Timing iterations
+  timing_iterations: 10
+
+# Baseline Configurations
+baselines:
+  B0_full_fp16:
+    enabled: true
+    description: "Full-precision FP16 KV-cache reference (no compression)"
+    policy_mode: "full_fp16"
+    n_b: 64
+    keep_ratio: 1.0
+    s_budget: 16
+    enable_hmm_decay: false
+  
+  B1_vllm:
+    enabled: false  # vLLM may not be compatible with custom cache
+    description: "Standard vLLM inference engine with PagedAttention"
+    # Note: vLLM uses its own cache management; comparison may not be apples-to-apples
+  
+  B2_kv_quantization:
+    enabled: true
+    description: "KV-cache quantization baseline (KIVI-style or compatible)"
+    method: "kivi_compatible"  # Using compatible implementation
+    bits: [2, 4, 8]
+    group_size: 128
+  
+  B3_token_eviction:
+    enabled: true
+    description: "Token eviction baselines (H2O, StreamingLLM)"
+    methods:
+      - name: "h2o"
+        keep_ratio: 0.20
+        recent_window: 64
+        attention_sink: 4
+      - name: "streaming_llm"
+        recent_window: 64
+        attention_sink: 4
+      - name: "standalone_h2o"
+        policy_mode: "standalone_h2o"
+        keep_ratio: 0.20
+        n_b: 64
+  
+  B4_stoikovkv_hybrid:
+    enabled: true
+    description: "StoikovKV full hybrid pipeline"
+    policy_mode: "hybrid"
+    n_b: 64
+    keep_ratio: 0.15
+    s_budget: 16
+    lambda1: 0.04
+    sink_tokens: 4
+    sink_bonus: 100.0
+    enable_hmm_decay: true
+    h2o_context_window: 1
+    max_rollback_window: 32
+
+# Ablation Configurations
+ablations:
+  - name: "full_fp16"
+    description: "Full FP16 cache (reference)"
+    policy_mode: "full_fp16"
+    n_b: 64
+    keep_ratio: 1.0
+    s_budget: 16
+    enable_hmm_decay: false
+  
+  - name: "routing_only"
+    description: "StoikovKV routing only, other transformations disabled"
+    policy_mode: "hybrid"
+    n_b: 64
+    keep_ratio: 1.0
+    s_budget: 16
+    enable_hmm_decay: false
+    # Note: Need custom implementation to disable H2O and Lexico
+  
+  - name: "routing_plus_retrieval_fp16"
+    description: "Routing plus retrieval-protected FP16 heads"
+    policy_mode: "hybrid"
+    n_b: 64
+    keep_ratio: 1.0
+    s_budget: 16
+    enable_hmm_decay: false
+    # Only Retrieval heads use FP16; others pass through
+  
+  - name: "routing_plus_h2o"
+    description: "Routing plus H2O eviction"
+    policy_mode: "hybrid"
+    n_b: 64
+    keep_ratio: 0.15
+    s_budget: 16
+    enable_hmm_decay: false
+    # Lexico heads fall back to FP16 or H2O
+  
+  - name: "routing_plus_lexico"
+    description: "Routing plus Lexico dictionary coding"
+    policy_mode: "hybrid"
+    n_b: 64
+    keep_ratio: 1.0
+    s_budget: 16
+    enable_hmm_decay: false
+    # H2O heads fall back to FP16
+  
+  - name: "routing_plus_h2o_lexico"
+    description: "Routing plus H2O and Lexico (no adaptation)"
+    policy_mode: "hybrid"
+    n_b: 64
+    keep_ratio: 0.15
+    s_budget: 16
+    enable_hmm_decay: false
+  
+  - name: "full_stoikovkv_with_adaptation"
+    description: "Full StoikovKV with adaptation/drift detection"
+    policy_mode: "hybrid"
+    n_b: 64
+    keep_ratio: 0.15
+    s_budget: 16
+    enable_hmm_decay: true
+    h2o_context_window: 1
+  
+  - name: "full_stoikovkv_no_adaptation"
+    description: "Full StoikovKV with adaptation disabled"
+    policy_mode: "hybrid"
+    n_b: 64
+    keep_ratio: 0.15
+    s_budget: 16
+    enable_hmm_decay: false
+    h2o_context_window: 1
+  
+  - name: "fixed_routing"
+    description: "Fixed routing (no dynamic updates)"
+    policy_mode: "hybrid"
+    n_b: 64
+    keep_ratio: 0.15
+    s_budget: 16
+    enable_hmm_decay: false
+    # Routing fixed from calibration
+
+# Evaluation Datasets
+datasets:
+  # Needle-in-haystack retrieval
+  needle_retrieval:
+    enabled: true
+    needle_text: "The secret passkey is 94812"
+    distractor_numbers: ["71039", "51904", "38291", "60417", "41820", "83910"]
+    positions: ["early", "middle", "late"]
+    context_lengths: [512, 2048, 4096]
+    num_trials: 5
+  
+  # Long-context tasks
+  long_context:
+    enabled: true
+    tasks:
+      - name: "instruction_following"
+        prompt_template: "Follow the instruction: {instruction}\nContext: {context}\nResponse:"
+      - name: "summarization"
+        prompt_template: "Summarize the following document:\n{context}\n\nSummary:"
+      - name: "fact_retrieval"
+        prompt_template: "Based on the context, answer: {question}\nContext: {context}\nAnswer:"
+      - name: "multi_fact_qa"
+        prompt_template: "Answer the questions based on the context:\n{context}\n\nQuestions:\n{questions}\n\nAnswers:"
+      - name: "context_update"
+        prompt_template: "Context has been updated. Old fact: {old_fact}. New fact: {new_fact}.\nQuery: {query}\nAnswer:"
+  
+  # Context drift
+  context_drift:
+    enabled: true
+    drift_scenarios:
+      - name: "topic_shift"
+        description: "Abrupt topic change with retrieval after shift"
+      - name: "gradual_drift"
+        description: "Gradual topic evolution"
+      - name: "conflicting_facts"
+        description: "Old fact contradicted by new information"
+
+# Hardware and Environment
+hardware:
+  gpu:
+    expected_model: "NVIDIA GeForce RTX 4060 Laptop GPU"
+    expected_vram_gb: 8
+  cpu:
+    expected_cores: 12
+  software:
+    python_version: "3.12"
+    pytorch_version: "2.12.0+cu130"
+    transformers_version: "auto"
+    cuda_version: "13.0"
+
+# Output Configuration
+output:
+  results_dir: "benchmarks/comparative_audit/results"
+  logs_dir: "benchmarks/comparative_audit/logs"
+  report_path: "benchmarks/comparative_audit/FINAL_COMPARATIVE_AUDIT.md"
+  raw_results_format: "jsonl"
+  aggregate_format: "csv"
+  save_plots: true
+  plot_format: "png"
