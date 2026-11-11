@@ -106,8 +106,8 @@ def main():
         },
         "file_hashes": file_hashes,
         "artifacts": {
-            "calibrated_artifacts_1.5b": str(root / "calibrated_artifacts.pt"),
-            "calibrated_artifacts_7b": str(root / "calibrated_artifacts_7b.pt"),
+            "calibrated_artifacts_1.5b": str(root / "artifacts" / "calibrated_artifacts.pt"),
+            "calibrated_artifacts_7b": str(root / "artifacts" / "calibrated_artifacts_7b.pt"),
         },
     }
     

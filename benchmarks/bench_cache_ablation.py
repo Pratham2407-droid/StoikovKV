@@ -1,5 +1,5 @@
 """
-Person 2 Standalone Evaluation & Benchmark Suite (`benchmarks/bench_person2.py`).
+Person 2 Standalone Evaluation & Benchmark Suite (`benchmarks/bench_cache_ablation.py`).
 
 Evaluates the live StoikovKV inference engine (`stoikov_kv/cache.py` & `stoikov_kv/matryoshka_spec.py`)
 on CUDA/FP16 without ever requiring `output_attentions=True` during live generation:
@@ -24,7 +24,7 @@ on CUDA/FP16 without ever requiring `output_attentions=True` during live generat
 3. **Outputs**:
    - `pareto_quality_vs_bytes.png`
    - `matryoshka_acceptance.png`
-   - `eval_results.json`
+   - `cache_ablation_results.json`
 """
 
 from __future__ import annotations
@@ -40,8 +40,9 @@ from typing import Any, Dict, List, Tuple
 os.environ.setdefault("TRITON_CACHE_DIR", "/tmp/triton_stoikov")
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
+for _p in (ROOT_DIR, ROOT_DIR / "src"):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 import matplotlib
 
@@ -921,7 +922,7 @@ def main() -> None:
         f"{model.config.num_key_value_heads} KV heads"
     )
 
-    artifacts_path = str(ROOT_DIR / "calibrated_artifacts.pt")
+    artifacts_path = str(ROOT_DIR / "artifacts" / "calibrated_artifacts.pt")
     if os.path.exists(artifacts_path):
         print(f"[Artifacts] Loading calibrated artifacts from {artifacts_path}")
         artifacts = load_or_create_artifacts(model, artifacts_path=artifacts_path, tokenizer=tokenizer)
@@ -1019,16 +1020,13 @@ def main() -> None:
 
     # 3. Save Plots & JSON Results
     pareto_paths = [
-        ROOT_DIR / "pareto_quality_vs_bytes.png",
-        ROOT_DIR / "benchmarks" / "pareto_quality_vs_bytes.png",
+        ROOT_DIR / "benchmarks" / "results" / "pareto_quality_vs_bytes.png",
     ]
     matryoshka_paths = [
-        ROOT_DIR / "matryoshka_acceptance.png",
-        ROOT_DIR / "benchmarks" / "matryoshka_acceptance.png",
+        ROOT_DIR / "benchmarks" / "results" / "matryoshka_acceptance.png",
     ]
     json_paths = [
-        ROOT_DIR / "eval_results.json",
-        ROOT_DIR / "benchmarks" / "eval_results.json",
+        ROOT_DIR / "benchmarks" / "results" / "cache_ablation_results.json",
     ]
 
     plot_pareto_quality_vs_bytes(ablation_results, pareto_paths)

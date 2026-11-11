@@ -15,8 +15,9 @@ from typing import Any, Dict
 import torch
 
 ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+for _p in (ROOT, ROOT / "src"):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 from stoikov_kv.cache import StoikovKVCache, load_or_create_artifacts
 from stoikov_kv.calibration import load_model_and_tokenizer
@@ -88,7 +89,7 @@ def main() -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float16 if device == "cuda" else torch.float32
     model, tokenizer = load_model_and_tokenizer(device=device, dtype=dtype, use_real_model=False)
-    artifacts = load_or_create_artifacts(model, artifacts_path=str(ROOT / "calibrated_artifacts.pt"), tokenizer=tokenizer)
+    artifacts = load_or_create_artifacts(model, artifacts_path=str(ROOT / "artifacts" / "calibrated_artifacts.pt"), tokenizer=tokenizer)
     prompt, target = build_drift_prompt()
     results = {
         "scenario": "Maya fell in a ditch → unrelated CSS/space/recipe discussion → retrieval query",
@@ -99,7 +100,7 @@ def main() -> None:
             evaluate_policy(model, tokenizer, artifacts, "hybrid", prompt, target),
         ],
     }
-    out_path = ROOT / "context_drift_results.json"
+    out_path = ROOT / "benchmarks" / "results" / "context_drift_results.json"
     out_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
     print(json.dumps(results, indent=2))
     print(f"Saved: {out_path}")

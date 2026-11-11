@@ -1,0 +1,226 @@
+{
+  "scenario": "Maya fell in a ditch \u2192 unrelated CSS/space/recipe discussion \u2192 retrieval query",
+  "model": "Qwen/Qwen2.5-1.5B-Instruct (Standalone GQA)",
+  "device": "cuda",
+  "quantization": "FP16 (fallback model)",
+  "results": [
+    {
+      "policy": "full_fp16",
+      "prompt_tokens": 2970,
+      "target": "ditch",
+      "target_token_id": 1229,
+      "predicted_token_id": 2838,
+      "retrieval_top1": false,
+      "target_probability": 3.8459929783130065e-05,
+      "target_rank": 3140,
+      "h2o_post_drift_freshness_pct": 0.0,
+      "seq_length": 2970,
+      "policy_mode": "full_fp16",
+      "active_atoms": 16,
+      "s_budget": 16,
+      "keep_ratio": 0.1,
+      "n_b": 128,
+      "fp16_bytes": 36495360,
+      "compressed_bytes": 36495360,
+      "memory_ratio_vs_fp16": 1.0,
+      "memory_savings_pct": 0.0,
+      "dictionary_bytes": 0,
+      "memory_ratio_incl_dictionary": 1.0,
+      "bytes_read_last_step": 36495360,
+      "cumulative_bytes_read": 470605824,
+      "per_tier_token_counts": {
+        "local_window_fp16": 6144,
+        "retrieval_fp16": 136416,
+        "peaked_h2o_fp16": 0,
+        "diffuse_lexico_sparse": 0,
+        "evicted_h2o": 0
+      },
+      "hmm_last_beta_t": 1.0,
+      "hmm_last_z_score": 0.0,
+      "hmm_shift_events": 0,
+      "head_roles": [
+        [
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "policy": "hybrid",
+      "prompt_tokens": 2970,
+      "target": "ditch",
+      "target_token_id": 1229,
+      "predicted_token_id": 4480,
+      "retrieval_top1": false,
+      "target_probability": 3.346329685882665e-05,
+      "target_rank": 4515,
+      "h2o_post_drift_freshness_pct": 100.0,
+      "seq_length": 2970,
+      "policy_mode": "hybrid",
+      "active_atoms": 16,
+      "s_budget": 16,
+      "keep_ratio": 0.1,
+      "n_b": 128,
+      "fp16_bytes": 36495360,
+      "compressed_bytes": 7566280,
+      "memory_ratio_vs_fp16": 0.20732169788159371,
+      "memory_savings_pct": 79.26783021184063,
+      "dictionary_bytes": 65536,
+      "memory_ratio_incl_dictionary": 0.20911743301066218,
+      "bytes_read_last_step": 7566280,
+      "cumulative_bytes_read": 113366216,
+      "per_tier_token_counts": {
+        "local_window_fp16": 6144,
+        "retrieval_fp16": 5684,
+        "peaked_h2o_fp16": 12177,
+        "diffuse_lexico_sparse": 14210,
+        "evicted_h2o": 104345
+      },
+      "hmm_last_beta_t": 0.65,
+      "hmm_last_z_score": 1.7043967406515974,
+      "hmm_shift_events": 5,
+      "head_roles": [
+        [
+          1,
+          2,
+          2,
+          2
+        ],
+        [
+          2,
+          1,
+          2,
+          1
+        ],
+        [
+          1,
+          1,
+          1,
+          1
+        ],
+        [
+          1,
+          1,
+          1,
+          1
+        ],
+        [
+          1,
+          1,
+          1,
+          1
+        ],
+        [
+          1,
+          1,
+          1,
+          1
+        ],
+        [
+          1,
+          1,
+          1,
+          1
+        ],
+        [
+          0,
+          1,
+          1,
+          1
+        ],
+        [
+          1,
+          0,
+          1,
+          1
+        ],
+        [
+          1,
+          1,
+          1,
+          1
+        ],
+        [
+          1,
+          1,
+          1,
+          1
+        ],
+        [
+          1,
+          1,
+          1,
+          1
+        ]
+      ]
+    }
+  ]
+}

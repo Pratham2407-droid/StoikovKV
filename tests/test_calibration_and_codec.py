@@ -1,5 +1,5 @@
 """
-Focused Unit Tests for StoikovKV Person 1 Pipeline (`tests/test_person1_pipeline.py`).
+Focused Unit Tests for StoikovKV Person 1 Pipeline (`tests/test_calibration_and_codec.py`).
 
 Covers all 9 required validation areas on CPU (and CUDA when available) without requiring
 network access or large model downloads:
@@ -17,14 +17,20 @@ network access or large model downloads:
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 import unittest
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+for _p in (_ROOT, os.path.join(_ROOT, "src")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 
-from benchmarks.bench_person1 import (
+from benchmarks.bench_calibration_codec import (
     ENGLISH_ADAPT_PROMPTS,
     ENGLISH_EVAL_PROMPTS,
     KANNADA_ADAPT_PROMPTS,

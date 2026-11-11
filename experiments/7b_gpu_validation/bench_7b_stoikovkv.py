@@ -14,6 +14,11 @@ from typing import Any, Dict, List
 import torch
 
 ROOT = Path(__file__).resolve().parent.parent.parent
+SRC_DIR = ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+RESULTS_DIR = ROOT / "benchmarks" / "results" / "7b_gpu_validation"
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -349,7 +354,7 @@ def main():
     print(f"VRAM: {torch.cuda.memory_allocated()/1e9:.2f} GB")
     
     # Load REAL 7B calibration artifacts
-    artifacts_path = ROOT / "calibrated_artifacts_7b_real.pt"
+    artifacts_path = ROOT / "artifacts" / "calibrated_artifacts_7b_real.pt"
     if artifacts_path.exists():
         print(f"\nLoading REAL 7B calibrated artifacts from: {artifacts_path}")
         artifacts = load_or_create_artifacts(model, artifacts_path=str(artifacts_path), tokenizer=tokenizer)
@@ -402,7 +407,7 @@ def main():
         all_results["policy_evaluation"][test["name"]] = test_results
     
     # Save results
-    output_path = Path(__file__).parent / "results.json"
+    output_path = RESULTS_DIR / "results.json"
     output_path.write_text(json.dumps(all_results, indent=2))
     print(f"\n\nResults saved to: {output_path}")
     

@@ -1,18 +1,30 @@
-# Python & Virtualenv
+# Python & packaging
 .venv/
 venv/
 __pycache__/
 *.py[cod]
 *$py.class
+*.egg-info/
+src/*.egg-info/
+build/
+dist/
 .pytest_cache/
 
-# Unrelated workspace binaries / slides
-*.deb
-*.pptx
-stoikovkv_master_implementation_prompts (1).md
-
-# Large generated PyTorch binary artifacts (regenerated via calibrate_model / bench_person1.py)
+# Local model weights, datasets & calibrated binary artifacts
+/models/
+/data/
+/artifacts/
 *.pt
+*.safetensors
+*.bin
+*.gguf
+
+# Generated benchmark outputs, plots & logs
+benchmarks/results/
+benchmarks/comparative_audit/logs/
+benchmarks/comparative_audit/results/
+*.png
+raw_results.jsonl
 
 # Frontend build & dependencies
 node_modules/
@@ -22,3 +34,9 @@ frontend/.next/
 frontend.zip
 *.tsbuildinfo
 frontend/*.tsbuildinfo
+
+# Unrelated workspace binaries / slides
+*.deb
+*.pptx
+*.docx
+*.pdf

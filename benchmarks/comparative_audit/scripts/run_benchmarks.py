@@ -29,10 +29,10 @@ REPO_ROOT = SCRIPT_DIR.parent.parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-# Also add the stoikov_kv package explicitly
-STOIKOV_PATH = REPO_ROOT / "stoikov_kv"
-if str(STOIKOV_PATH) not in sys.path:
-    sys.path.insert(0, str(STOIKOV_PATH))
+# Add src/ directory for stoikov_kv package
+SRC_PATH = REPO_ROOT / "src"
+if str(SRC_PATH) not in sys.path:
+    sys.path.insert(0, str(SRC_PATH))
 
 # Add benchmarks path for imports
 BENCHMARKS_PATH = REPO_ROOT / "benchmarks"
@@ -262,7 +262,7 @@ class BenchmarkRunner:
         self.log(f"Model loaded: {self.model.__class__.__name__} on {next(self.model.parameters()).device}")
         
         # Load or create calibration artifacts
-        artifacts_path = REPO_ROOT / "calibrated_artifacts.pt"
+        artifacts_path = REPO_ROOT / "artifacts" / "calibrated_artifacts.pt"
         if artifacts_path.exists():
             self.log(f"Loading calibration artifacts from {artifacts_path}")
             from stoikov_kv.cache import load_or_create_artifacts

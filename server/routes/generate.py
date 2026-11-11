@@ -310,7 +310,7 @@ async def delete_session(session_id: str):
 async def recalibrate():
     """Reload calibrated artifacts from disk and reset all sessions.
 
-    Full re-calibration is an offline step (benchmarks/bench_person1.py); this
+    Full re-calibration is an offline step (benchmarks/bench_calibration_codec.py); this
     endpoint makes the dashboard pick up freshly written artifacts.
     """
     from server.main import app
@@ -321,7 +321,7 @@ async def recalibrate():
     model = app.state.model
     artifacts = load_or_create_artifacts(
         model,
-        artifacts_path=str(model_loader.ENGINE_ROOT / "calibrated_artifacts.pt"),
+        artifacts_path=str(model_loader.ARTIFACTS_PATH),
         tokenizer=app.state.tokenizer,
     )
     model_loader._artifacts = artifacts

@@ -15,6 +15,11 @@ from typing import Any, Dict, List
 import torch
 
 ROOT = Path(__file__).resolve().parent.parent.parent
+SRC_DIR = ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+RESULTS_DIR = ROOT / "benchmarks" / "results" / "7b_gpu_validation"
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -318,7 +323,7 @@ def main():
         "results": all_results,
     }
     
-    output_path = Path(__file__).parent / "baseline.json"
+    output_path = RESULTS_DIR / "baseline.json"
     output_path.write_text(json.dumps(output, indent=2))
     print(f"\n\nBaseline results saved to: {output_path}")
     

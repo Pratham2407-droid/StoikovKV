@@ -15,6 +15,11 @@ from typing import Any, Dict
 import torch
 
 ROOT = Path(__file__).resolve().parent.parent.parent
+SRC_DIR = ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+RESULTS_DIR = ROOT / "benchmarks" / "results" / "7b_gpu_validation"
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -104,7 +109,7 @@ def main() -> None:
     tokenizer = FallbackQwen2Tokenizer(vocab_size=cfg.vocab_size)
     model.eval()
     
-    artifacts = load_or_create_artifacts(model, artifacts_path=str(ROOT / "calibrated_artifacts_7b.pt"), tokenizer=tokenizer)
+    artifacts = load_or_create_artifacts(model, artifacts_path=str(ROOT / "artifacts" / "calibrated_artifacts_7b.pt"), tokenizer=tokenizer)
     prompt, target = build_drift_prompt()
     results = {
         "scenario": "Maya fell in a ditch \u2192 unrelated CSS/space/recipe discussion \u2192 retrieval query",
@@ -116,7 +121,7 @@ def main() -> None:
             evaluate_policy(model, tokenizer, artifacts, "hybrid", prompt, target),
         ],
     }
-    out_path = ROOT / "context_drift_results_7b.json"
+    out_path = RESULTS_DIR / "context_drift_results_7b.json"
     out_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
     print(json.dumps(results, indent=2))
     print(f"Saved: {out_path}")

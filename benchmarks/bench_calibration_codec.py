@@ -1,5 +1,5 @@
 """
-End-to-End Benchmark & Publication Plot Generator for Person 1 (`benchmarks/bench_person1.py`).
+End-to-End Benchmark & Publication Plot Generator for Person 1 (`benchmarks/bench_calibration_codec.py`).
 
 Executes reproducible, held-out measurements for StoikovKV calibration and sparse KV compression:
 1. Offline Model Calibration (`calibrate_model` -> `calibrated_artifacts.pt`):
@@ -23,7 +23,7 @@ Executes reproducible, held-out measurements for StoikovKV calibration and spars
    - Reports empirical `s_adapt`, `delta_s`, and `L_star` (explicitly marking `None` when
      `delta_s <= 0`).
 4. Saves 3 PNG figures (`probe_correlation.png`, `elasticnet_vs_omp.png`, `kannada_code_lstar.png`)
-   and structured JSON metrics (`person1_metrics.json`).
+   and structured JSON metrics (`calibration_codec_metrics.json`).
 """
 
 from __future__ import annotations
@@ -47,8 +47,9 @@ import torch
 
 # Ensure repo root is on sys.path
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if REPO_ROOT not in sys.path:
-    sys.path.insert(0, REPO_ROOT)
+for _p in (REPO_ROOT, os.path.join(REPO_ROOT, "src")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from stoikov_kv.calibration import (
     CALIBRATION_PROMPTS,
@@ -856,7 +857,7 @@ def run_person1_benchmarks(seed: int = 42) -> Dict[str, Any]:
     tokenizer = FallbackQwen2Tokenizer(vocab_size=32768)
     model.eval()
 
-    artifacts_path = os.path.join(REPO_ROOT, "calibrated_artifacts.pt")
+    artifacts_path = os.path.join(REPO_ROOT, "artifacts", "calibrated_artifacts.pt")
     artifacts = calibrate_model(
         model, tokenizer, save_path=artifacts_path, seed=seed,
         dict_atoms=128, dict_steps=10, max_seq_len=256, subspace_rank=16
@@ -1145,19 +1146,16 @@ def run_person1_benchmarks(seed: int = 42) -> Dict[str, Any]:
             f"LogitCos={pol_stats['logit_cosine_similarity']:.4f}"
         )
 
-    bench_dir = os.path.dirname(os.path.abspath(__file__))
+    bench_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
     os.makedirs(bench_dir, exist_ok=True)
 
     p1_paths = [
-        os.path.join(REPO_ROOT, "probe_correlation.png"),
         os.path.join(bench_dir, "probe_correlation.png"),
     ]
     p2_paths = [
-        os.path.join(REPO_ROOT, "elasticnet_vs_omp.png"),
         os.path.join(bench_dir, "elasticnet_vs_omp.png"),
     ]
     p3_paths = [
-        os.path.join(REPO_ROOT, "kannada_code_lstar.png"),
         os.path.join(bench_dir, "kannada_code_lstar.png"),
     ]
 
@@ -1254,8 +1252,7 @@ def run_person1_benchmarks(seed: int = 42) -> Dict[str, Any]:
     plot_kannada_code_lstar(domain_results, p3_paths)
 
     json_paths = [
-        os.path.join(REPO_ROOT, "person1_metrics.json"),
-        os.path.join(bench_dir, "person1_metrics.json"),
+        os.path.join(bench_dir, "calibration_codec_metrics.json"),
     ]
     for jp in json_paths:
         with open(jp, "w", encoding="utf-8") as f:
