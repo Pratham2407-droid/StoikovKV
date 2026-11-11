@@ -9,6 +9,7 @@
 ```text
 .
 ├── pyproject.toml                  # Package metadata & dependencies (src/ layout)
+├── BENCHMARK_NUMBERS.md            # Complete consolidated benchmark tables & metrics
 ├── src/
 │   └── stoikov_kv/                 # Core Python package
 │       ├── __init__.py
