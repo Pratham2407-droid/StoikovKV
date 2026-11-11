@@ -5,7 +5,13 @@ Unit tests for StoikovKV Person 2 Live Inference Engine (`stoikov_kv/cache.py` &
 from __future__ import annotations
 
 import os
+import sys
 import unittest
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+for _p in (_ROOT, os.path.join(_ROOT, "src")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 import torch
 

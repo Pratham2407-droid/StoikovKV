@@ -5,7 +5,10 @@ Run: python scripts/serve.py
 """
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+for _p in (_ROOT, os.path.join(_ROOT, "src")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 import uvicorn
 from server.config import server_config

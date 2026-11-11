@@ -11,6 +11,9 @@ from typing import Any, Dict, List, Optional
 import torch
 
 ROOT = Path(__file__).resolve().parent.parent.parent
+SRC_DIR = ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -517,7 +520,7 @@ def main():
     print(f"VRAM after load: {torch.cuda.memory_allocated()/1e9:.2f} GB")
     
     # Run optimized calibration
-    artifacts_path = ROOT / "calibrated_artifacts_7b_real.pt"
+    artifacts_path = ROOT / "artifacts" / "calibrated_artifacts_7b_real.pt"
     artifacts = calibrate_model_memory_optimized(
         model,
         tokenizer,

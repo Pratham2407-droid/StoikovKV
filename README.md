@@ -1,246 +1,96 @@
-# StoikovKV: Adaptive KV-Cache Compression for Decoder-Only Transformers
+# StoikovKV
 
-Adaptive, per-head KV-cache compression unifying H2O eviction, Lexico sparse coding, and Matryoshka self-speculative decoding under live VRAM pressure control.
+**StoikovKV** is a hybrid KV-cache compression and routing library for Grouped-Query Attention (GQA) language models. It combines write-time query-subspace probing, per-head role routing, 1-step preconditioned ElasticNet dictionary coding, non-stationary HMM topic-shift decay, and Matryoshka self-speculative decoding.
 
-## Qwen2.5-7B-Instruct on 8GB VRAM (Real Model)
+---
 
-| Configuration | Needle Retrieval | Memory % | Compression | Tokens/sec | Peak VRAM |
-|---------------|-----------------|----------|-------------|------------|-----------|
-| Full FP16 (real 7B) | FAIL | 100% | 1.0x | 0.8 tok/s | 6.9 GB |
-| StoikovKV Hybrid (real 7B) | FAIL | 33-41% | 2.4-3.0x | 0.7-0.8 tok/s | 6.9 GB |
-| Standalone H2O (real 7B) | FAIL | 28-36% | 2.8-3.6x | 0.8 tok/s | 6.9 GB |
+## Repository Layout
 
-Root Cause: 8GB VRAM insufficient for real 7B calibration. Forced reduced prompts (3 prompts, seq_len=64) -> probe correlation ρ=-0.022 -> only 6 retrieval heads vs ~20 needed -> recall collapses. Memory savings 32-67% work but retrieval fails.
+```text
+.
+├── pyproject.toml                  # Package metadata & dependencies (src/ layout)
+├── src/
+│   └── stoikov_kv/                 # Core Python package
+│       ├── __init__.py
+│       ├── calibration.py          # Offline subspace (U_Q), head-role & dictionary calibration
+│       ├── elastic_lexico.py       # 1-step ElasticNet sparse dictionary codec + OMP/FISTA baselines
+│       ├── cache.py                # StoikovKVCache(DynamicCache) + HMMTopicShiftController
+│       └── matryoshka_spec.py      # Matryoshka nested-atom self-speculative decoding
+├── server/                         # FastAPI inference & telemetry backend
+├── frontend/                       # Next.js real-time cache telemetry dashboard
+├── config/                         # YAML configuration files (model, cache, server)
+├── scripts/                        # Launch & E2E verification scripts
+├── benchmarks/                     # Reproducible benchmark suites
+│   ├── bench_calibration_codec.py  # Probe correlation, ElasticNet vs OMP/FISTA, domain L* break-even
+│   ├── bench_cache_ablation.py     # Equal-budget 4-way cache ablation & Matryoshka sweep
+│   ├── bench_context_drift.py      # Multi-turn topic-shift & H2O freshness evaluation
+│   ├── bench_context_switch.py     # Multi-turn context switching evaluation
+│   ├── bench_longbench.py          # Long-context task evaluation suite
+│   ├── comparative_audit/          # Configurable comparative audit runner
+│   └── results/                    # Generated plots & JSON metrics (gitignored)
+├── experiments/
+│   └── 7b_gpu_validation/          # 7B GPU calibration & offloading experiment scripts
+├── tests/                          # Unit test suites
+│   ├── test_calibration_and_codec.py
+│   └── test_cache_and_speculative.py
+├── docs/
+│   └── reports/historical/         # Archived hackathon reports & raw snapshots
+├── artifacts/                      # Local calibrated .pt artifacts (gitignored)
+├── models/                         # Local model weight shards (gitignored)
+└── data/                           # Local evaluation datasets (gitignored)
+```
 
-Real 7B Memory Savings (Hybrid Policy):
-| Context | Full FP16 | Hybrid | Savings |
-|---------|-----------|--------|---------|
-| 28 MB (Early) | 100% | 39.9% | 60.1% |
-| 32 MB (Middle) | 100% | 36.9% | 63.1% |
-| 40 MB (Late) | 100% | 32.7% | 67.3% |
+---
 
-Hardware Requirements for Real 7B:
-| Config | Min VRAM | Notes |
-|--------|----------|-------|
-| 7B FP16 + full calibration | 16 GB | No offloading |
-| 7B FP16 + reduced calibration | 12 GB | Minimum viable |
-| 7B 4-bit (working) | 8 GB | Need custom CUDA kernels |
+## Architecture Overview
 
-## Qwen2.5-1.5B-Instruct (Fallback Model, 8GB RTX 4060)
+1. **Offline Calibration (`stoikov_kv.calibration`):**
+   - Extracts a rank-$r$ ($r = 16$) orthonormal query subspace basis $U_Q \in \mathbb{R}^{L \times H_{kv} \times d \times r}$ per KV head group.
+   - Scores incoming tokens at write time without materializing the $O(T^2)$ attention matrix:
+     $$I_t = \|K_t U_Q\|_2 \cdot \|V_t\|_2$$
+   - Classifies each KV head into one of three tiers:
+     - `ROLE_RETRIEVAL_FP16 (0)`: High needle-copy heads retained in exact FP16.
+     - `ROLE_PEAKED_H2O (1)`: Low-entropy heads managed via decayed heavy-hitter eviction.
+     - `ROLE_DIFFUSE_LEXICO (2)`: High-entropy diffuse heads compressed into $s$ sorted dictionary atoms (`3s + 2` bytes/vector).
+   - Trains per-layer normalized dictionaries $D \in \mathbb{R}^{L \times d \times 1024}$ on pre-RoPE keys and values, and precomputes the ridge projection matrix $W_{\text{ridge}} = (D^\top D + \lambda_2 I)^{-1} D^\top$ in FP64.
 
-| Configuration | Needle Retrieval | Physical Storage | Compression | Logit Cosine |
-|---------------|-----------------|------------------|-------------|--------------|
-| Full FP16 (baseline) | 100% | 256 B/vec | 1.0x | 1.000 |
-| StoikovKV Hybrid (s=16) | 100% | 108.86 B/vec | 2.35x | 0.998 |
-| StoikovKV Hybrid Draft (m=4) | 100% | 83.14 B/vec | 3.08x | 0.998 |
-| Lexico only (s=16) | 100% | 256 B/vec | 1.0x | 0.998 |
-| H2O only (r=0.3) | 0% | 44 B/vec | 5.8x | - |
-| Unprotected Ablation | 16.7% | 5 B/vec | 51.2x | 0.11 |
+2. **Sparse Dictionary Codec (`stoikov_kv.elastic_lexico`):**
+   - Encodes vectors in a single matrix-multiply + soft-threshold + top-$s$ selection pass, sorting atoms by descending magnitude (`|y_(1)| >= ... >= |y_(s)|`) and quantizing values to `int8` with a per-vector FP16 scale.
+   - Un-rotates keys into the pre-RoPE frame prior to dictionary encoding and re-applies RoPE at the stored token position upon decoding.
 
-Key Insight: Pure H2O/Lexico fail at high compression. Hybrid works by protecting retrieval heads in FP16 while compressing the rest.
+3. **Live Hybrid Cache & HMM Controller (`stoikov_kv.cache`):**
+   - Maintains a recent uncompressed sliding window (`n_b = 64` tokens) and routes overflowing tokens per KV head according to `head_roles`.
+   - Tracks query-subspace projection energy shifts via `HMMTopicShiftController`, accelerating score decay ($\beta_t = 0.65$) on topic transitions so stale heavy hitters are replaced.
 
-## Architecture
+4. **Matryoshka Self-Speculative Decoding (`stoikov_kv.matryoshka_spec`):**
+   - Drafts $\gamma_{\text{spec}}$ candidate tokens using only the top $m < s$ dictionary atoms on `ROLE_DIFFUSE_LEXICO` heads (`3m + 2` bytes/vector) and verifies in parallel using all $s$ atoms, rolling back rejected tokens via `StoikovKVCache.crop(max_length)`.
 
-StoikovKVCache:
-- Per-Head Router (offline, entropy-based): ROLE_RETRIEVAL_FP16 (0) -> Exact FP16, never evicted; ROLE_PEAKED_H2O (1) -> Score-based eviction; ROLE_DIFFUSE_LEXICO (2) -> Sparse dictionary encoding
-- Write-Time Importance Probe: ||K @ U_Q||_2 * ||V||_2
-- H2O: Top-k by score + context window dilation
-- Lexico: Fast 1-step Ridge + Soft-thresholding (s atoms)
-- Matryoshka Self-Speculation: m=4 draft -> s=16 verify
-- Avellaneda-Stoikov Controller: Live VRAM pressure control
+---
 
-## 7B GPU Validation (Qwen2.5-7B, 8GB RTX 4060)
+## Current Engineering Status & Limitations
 
-| Aspect | Fallback (1.5B) | Real 7B (FP16 + CPU offload) |
-|--------|-----------------|------------------------------|
-| Model | 12L, 4 KV heads, h=64 | 28L, 4 KV heads, h=128 |
-| Calibration | Full (ρ=0.546) | Reduced (ρ=-0.022) |
-| Needle Retrieval | 100% | FAILS (ρ=-0.022) |
-| Throughput | 1,007 tok/s | 0.8 tok/s |
-| Peak VRAM | 0.38 GB | 6.9 GB |
-| Hybrid Memory | 19.8% (80% savings) | 33-41% (59-67% savings) |
-| Retrieval Heads | 2 (4.2%) | 6 (5.4%) |
+- **Verified Mechanics & Accounting:** All 15 unit tests (`tests/`) verify GQA subspace extraction, write-time probing, pre-RoPE dictionary coding, equal-budget tier routing, lossless `crop()` rollback, and Matryoshka draft/verify generation.
+- **Logical vs. Physical Memory:** `StoikovKVCache` currently tracks exact logical tier bytes (`compressed_bytes` and `dictionary_bytes`), but materializes rectangular FP16 tensors per layer for standard SDPA and delegates sequence tracking to `DynamicCache`. Eliminating duplicate physical storage and adding a tier-aware attention kernel is tracked as Phase 1 of the productization roadmap.
+- **Pretrained Model Validation:** By default, offline tests and benchmarks fall back to a deterministic synthetic GQA harness (`FallbackQwen2ForCausalLM`) when Hugging Face Hub weights are unavailable. Pretrained model benchmarks should be run with real checkpoints (`Qwen/Qwen2.5-1.5B-Instruct` or `Qwen/Qwen2.5-3B-Instruct`).
 
-Why 7B retrieval fails: 8GB VRAM forces reduced calibration (3 prompts, seq_len=64) -> probe correlation ρ=-0.022 -> only 6 retrieval heads vs ~20 needed -> recall collapses.
+---
 
-Real 7B Memory Savings (Hybrid Policy):
-| Context | Full FP16 | Hybrid | Savings |
-|---------|-----------|--------|---------|
-| 28 MB (Early) | 100% | 39.9% | 60.1% |
-| 32 MB (Middle) | 100% | 36.9% | 63.1% |
-| 40 MB (Late) | 100% | 32.7% | 67.3% |
-
-Hardware Requirements for Real 7B:
-| Config | Min VRAM | Notes |
-|--------|----------|-------|
-| 7B FP16 + full calibration | 16 GB | No offloading |
-| 7B FP16 + reduced calibration | 12 GB | Minimum viable |
-| 7B 4-bit (working) | 8 GB | Need custom CUDA kernels |
-
-## Benchmarks
-
-| Benchmark | Command | Description |
-|-----------|---------|-------------|
-| Person 1 | python benchmarks/bench_person1.py | Full calibration + codec + passkey eval |
-| Context Switch | python benchmarks/bench_context_switch.py | Topic-switching retrieval test |
-| Unit Tests | python tests/test_person1_pipeline.py | 11 pipeline tests |
-
-Key Metrics (from person1_metrics.json):
-
-| Metric | Value |
-|--------|-------|
-| Probe Spearman (raw) | 0.4265 |
-| Probe Recall@20% | 53.6% |
-| Lexico Encode (s=16) | 0.98 ms |
-| Lexico Cosine (s=16) | 0.73 |
-| Speedup vs OMP | 12.8x |
-| Speedup vs FISTA | 24x |
-| Adaptation L* (Python) | 916 tokens |
-| Adaptation L* (Kannada) | 442 tokens |
-
-## 7B GPU Validation (Qwen2.5-7B, 8GB RTX 4060)
-
-| Aspect | Fallback (1.5B) | Real 7B (FP16 + CPU offload) |
-|--------|-----------------|------------------------------|
-| Model | 12L, 4 KV heads, h=64 | 28L, 4 KV heads, h=128 |
-| Calibration | Full (ρ=0.546) | Reduced (ρ=-0.022) |
-| Needle Retrieval | 100% | FAILS (ρ=-0.022) |
-| Throughput | 1,007 tok/s | 0.8 tok/s |
-| Peak VRAM | 0.38 GB | 6.9 GB |
-| Hybrid Memory | 19.8% (80% savings) | 33-41% (59-67% savings) |
-| Retrieval Heads | 2 (4.2%) | 6 (5.4%) |
-
-Why 7B retrieval fails: 8GB VRAM forces reduced calibration (3 prompts, seq_len=64) -> probe correlation ρ=-0.022 -> only 6 retrieval heads vs ~20 needed -> recall collapses.
-
-Real 7B Memory Savings (Hybrid Policy):
-| Context | Full FP16 | Hybrid | Savings |
-|---------|-----------|--------|---------|
-| 28 MB (Early) | 100% | 39.9% | 60.1% |
-| 32 MB (Middle) | 100% | 36.9% | 63.1% |
-| 40 MB (Late) | 100% | 32.7% | 67.3% |
-
-Hardware Requirements for Real 7B:
-| Config | Min VRAM | Notes |
-|--------|----------|-------|
-| 7B FP16 + full calibration | 16 GB | No offloading |
-| 7B FP16 + reduced calibration | 12 GB | Minimum viable |
-| 7B 4-bit (working) | 8 GB | Need custom CUDA kernels |
-
-## WikiText-103 Production Evaluation (Fallback Model, 50 samples)
-
-| Policy | Tok/s | Peak VRAM | Memory % | Savings | HMM β_t | HMM Shifts |
-|--------|-------|-----------|----------|---------|---------|------------|
-| Full FP16 | 1,457 | 0.41 GB | 100.0% | 0.0% | 1.00 | 0 |
-| StoikovKV Hybrid | 1,007 | 0.38 GB | 19.8% | 80.2% | 0.99 | 14 |
-| Standalone H2O | 1,578 | 0.37 GB | 13.3% | 86.7% | 1.00 | 0 |
-| Standalone Lexico | 361 | 0.43 GB | 41.1% | 58.9% | 1.00 | 0 |
-
-Per-Tier Token Allocation (Hybrid):
-| Tier | Token Count | % of Total |
-|------|-------------|------------|
-| Local Window FP16 | 6,144 | 3.3% |
-| Retrieval FP16 | 7,414 | 4.0% |
-| H2O Peaked | 15,703 | 8.5% |
-| Lexico Sparse | 18,535 | 10.1% |
-| Evicted H2O | 136,284 | 74.1% |
-
-HMM Topic Shift Detection: WikiText-103 triggers 14 HMM shift events with hybrid policy. HMM β_t drops from 1.0 to 0.99. Z-score peaks at 0.67.
-
-Needle Retrieval (100% PASS all policies):
-| Test | Full FP16 | Hybrid | Standalone H2O | Standalone Lexico |
-|------|-----------|--------|----------------|-------------------|
-| Needle Early | PASS | PASS | PASS | PASS |
-| Needle Middle | PASS | PASS | PASS | PASS |
-| Needle Late | PASS | PASS | PASS | PASS |
-
-Needle Retrieval Detailed:
-| Test | Policy | Memory % | Tokens/s |
-|------|--------|----------|----------|
-| Early | Full FP16 | 100% | 24.5 |
-| | Hybrid | 42.1% | 13.8 |
-| | Standalone H2O | 37.6% | 23.3 |
-| | Standalone Lexico | 55.9% | 4.5 |
-
-Context Drift (2,970 tokens):
-| Policy | Retrieval | Memory % | H2O Freshness | HMM Shifts | β_t | Z-Score |
-|--------|-----------|----------|---------------|------------|-----|---------|
-| Full FP16 | FAIL | 100% | 0% | 0 | 1.00 | 0.00 |
-| Hybrid | FAIL | 20.7% | 100% | 5 | 0.65 | 1.46 |
-
-HMM detects shift (z=1.46, β_t=0.65) and achieves 100% H2O freshness post-drift.
-
-Matryoshka Self-Speculative Decoding:
-| Draft Atoms m | Draft Payload | Acceptance α | Avg Tokens/Cycle |
-|---------------|---------------|--------------|------------------|
-| m=2 | 8 B/vec | 96.9% | 4.65 |
-| m=4 | 14 B/vec | 100% | 5.00 |
-| m=8 | 26 B/vec | 100% | 5.00 |
-| m=12 | 38 B/vec | 100% | 5.00 |
-
-## Run
+## Installation & Quickstart
 
 ```bash
-pip install torch transformers accelerate scipy matplotlib numpy
-python benchmarks/bench_person1.py --model Qwen/Qwen2.5-1.5B-Instruct
+# Activate virtualenv and install in editable mode
+source .venv/bin/activate
+pip install -e .
+
+# Run unit tests
+python -m unittest discover -s tests -v
+
+# Run calibration + sparse codec benchmark (writes to benchmarks/results/)
+python benchmarks/bench_calibration_codec.py
+
+# Run 4-way equal-budget cache ablation & Matryoshka sweep (writes to benchmarks/results/)
+python benchmarks/bench_cache_ablation.py
+
+# Launch the FastAPI telemetry server
+python scripts/serve.py
 ```
-
-## Repository Structure
-
-```
-StoikovKV/
-├── stoikov_kv/
-│   ├── __init__.py
-│   ├── calibration.py      # Offline calibration, U_Q, head roles, dictionaries
-│   ├── cache.py            # StoikovKVCache (DynamicCache subclass)
-│   ├── elastic_lexico.py   # ElasticLexicoCodec (1-step encoder, OMP, FISTA)
-│   └── matryoshka_spec.py  # Nested-atom speculative decoding
-├── benchmarks/
-│   ├── bench_person1.py    # Full calibration + codec + passkey eval
-│   ├── bench_person2.py    # Legacy needle benchmark
-│   └── bench_context_switch.py  # Multi-topic context switching
-├── experiments/
-│   └── 7b_gpu_validation/  # Real 7B validation (NEW)
-│       ├── calibrate_7b_real.py      # Memory-optimized calibration
-│       ├── bench_7b_stoikovkv.py     # Real 7B policy evaluation
-│       ├── bench_7b_baseline.py      # FP16 baseline
-│       ├── bench_wikitext.py         # WikiText-103 evaluation
-│       ├── COMPLETE_EXPERIMENT_RESULTS.md  # All results in one file
-│       └── calibrated_artifacts_7b_real.pt
-├── tests/
-│   └── test_person1_pipeline.py  # 11 unit tests (all pass)
-├── server/
-│   ├── app.py              # FastAPI backend
-│   └── index.html          # FinOps dashboard (Tailwind + Chart.js)
-├── calibrated_artifacts.pt  # Pre-calibrated artifacts (Qwen2.5-1.5B)
-├── requirements.txt
-```
-
-## Key Implementation Details
-
-### Calibration (calibration.py)
-- Write-time probe: ||K @ U_Q||_2 * ||V||_2 with RoPE alignment
-- Head routing: Entropy-based (peaked -> H2O, diffuse -> Lexico, top 5% -> Retrieval)
-- Dictionary learning: SVD init + Adam (60 steps) + incoherence regularization
-- Probe evaluation: Spearman ρ & Recall@20% vs attention-derived ground truth
-
-### Elastic Lexico Codec (elastic_lexico.py)
-- Fast 1-step encoder: indices, values = codec.encode(KV_vectors, layer_idx=0, s=16)
-- Nested partial decoding: X_hat = codec.decode(indices, values, active_atoms=m)
-- Online adaptation: adapt_info = codec.adapt_online_atoms(X_fit, X_hat, M_adapt=64, X_eval=X_test)
-
-### Cache (cache.py)
-- StoikovKVCache(model, keep_ratio=0.3, h2o_context_window=1, lexico_fp16_frac=0.5, dense_fallback=True)
-- cache.set_matryoshka_mode(m=4) for draft mode
-- cache.set_matryoshka_mode(16) for verify mode
-
-## License
-
-MIT License
-
-## Acknowledgments
-
-- H2O: Zhang et al., NeurIPS 2023
-- Lexico: Kim et al., ICLR 2025
-- Speculative Decoding: Leviathan et al., ICML 2023
-- Avellaneda-Stoikov: Avellaneda & Stoikov, 2008
-- Qwen2.5: Alibaba Cloud Qwen Team

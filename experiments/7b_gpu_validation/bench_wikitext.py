@@ -12,6 +12,11 @@ import torch
 from tqdm import tqdm
 
 ROOT = Path(__file__).resolve().parent.parent.parent
+SRC_DIR = ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+RESULTS_DIR = ROOT / "benchmarks" / "results" / "7b_gpu_validation"
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -24,7 +29,7 @@ from stoikov_kv.calibration import (
 def load_wikitext_test(num_samples: int = 100, max_tokens: int = 2048) -> List[str]:
     """Load WikiText-103 test samples from local parquet."""
     print(f"Loading WikiText-103 test split from local parquet...")
-    parquet_path = Path("/mnt/storage/Projects/StoikovKV_Hackathon/datasets/wikitext-103/wikitext-103-raw-v1/test-00000-of-00001.parquet")
+    parquet_path = Path(ROOT / "data" / "wikitext" / "wikitext-103-raw-v1/test-00000-of-00001.parquet")
     df = pd.read_parquet(parquet_path)
     
     texts = []
@@ -193,7 +198,7 @@ def main():
     print(f"Layers: {model.config.num_hidden_layers}, Q heads: {model.config.num_attention_heads}, KV heads: {model.config.num_key_value_heads}, head_dim: {model.config.head_dim}")
     
     # Load calibration artifacts
-    artifacts_path = ROOT / "calibrated_artifacts_7b.pt"
+    artifacts_path = ROOT / "artifacts" / "calibrated_artifacts_7b.pt"
     if artifacts_path.exists():
         artifacts = load_or_create_artifacts(model, artifacts_path=str(artifacts_path), tokenizer=tokenizer)
         print(f"Artifacts loaded: U_Q={tuple(artifacts['U_Q'].shape)}")
@@ -242,7 +247,7 @@ def main():
         print(f"  Savings: {perf['memory_savings_pct']:.1f}%")
     
     # Save results
-    output_path = Path(__file__).parent / "wikitext_results.json"
+    output_path = RESULTS_DIR / "wikitext_results.json"
     output_path.write_text(json.dumps(results, indent=2))
     print(f"\n\nResults saved to: {output_path}")
     

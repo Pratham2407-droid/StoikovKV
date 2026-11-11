@@ -1871,14 +1871,22 @@ def calibrate_model(
                         calib_V[l_idx].append(v_t)
 
                         # Compute Shannon attention entropy H_h per KV head on calibration prompts
-                        attn_fp32 = attn_t.to(torch.float32).clamp(min=1e-9)
+                        # Robust numerical stability: clamp to [eps, 1-eps] to avoid log(0) and log(1)
+                        eps = 1e-7
+                        attn_fp32 = attn_t.to(torch.float32).clamp(min=eps, max=1.0 - eps)
+                        # Renormalize to ensure valid probability distribution
+                        attn_fp32 = attn_fp32 / attn_fp32.sum(dim=-1, keepdim=True).clamp(min=eps)
                         token_ent = -(attn_fp32 * attn_fp32.log()).sum(dim=-1)
+                        # Replace any non-finite with 0
+                        token_ent = torch.nan_to_num(token_ent, nan=0.0, posinf=0.0, neginf=0.0)
                         valid_ent = (
                             token_ent[:, :, 2:].mean(dim=-1)
                             if token_ent.shape[-1] > 2
                             else token_ent.mean(dim=-1)
                         )
                         kv_ent = valid_ent.view(1, num_kv_heads, q_per_kv).mean(dim=-1).squeeze(0)
+                        # Final safety check
+                        kv_ent = torch.nan_to_num(kv_ent, nan=0.0, posinf=0.0, neginf=0.0)
                         entropy_accum[l_idx] += kv_ent
                     else:
                         # Held-out split: immediately reduce 4D attention to 3D per-key reference and discard 4D tensor

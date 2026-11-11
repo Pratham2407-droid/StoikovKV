@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stoikov-kv"
+version = "0.2.0"
+description = "StoikovKV: Hybrid per-head KV-cache routing, write-time subspace probing, ElasticNet sparse coding, and Matryoshka speculative decoding"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "StoikovKV Contributors" }
+]
+dependencies = [
+  "torch>=2.2.0",
+  "numpy>=1.24.0",
+  "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+transformers = [
+  "transformers>=4.40.0",
+  "accelerate>=0.30.0",
+  "safetensors>=0.4.0",
+]
+server = [
+  "fastapi>=0.110.0",
+  "uvicorn>=0.29.0",
+  "pydantic>=2.6.0",
+]
+bench = [
+  "matplotlib>=3.8.0",
+]
+dev = [
+  "pytest>=8.0.0",
+]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["stoikov_kv*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]

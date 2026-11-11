@@ -5,13 +5,16 @@ import torch
 
 # Resolve ENGINE_ROOT relative to this file whether running inside repo root or as submodule
 _repo_root = Path(__file__).resolve().parents[2]
-if (_repo_root / "stoikov_kv").is_dir():
+if (_repo_root / "src" / "stoikov_kv").is_dir() or (_repo_root / "stoikov_kv").is_dir():
     ENGINE_ROOT = _repo_root
 else:
     ENGINE_ROOT = Path(__file__).resolve().parents[3] / "HashCode"
 
-if str(ENGINE_ROOT) not in sys.path:
-    sys.path.insert(0, str(ENGINE_ROOT))
+for _p in (ENGINE_ROOT, ENGINE_ROOT / "src"):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+
+ARTIFACTS_PATH = ENGINE_ROOT / "artifacts" / "calibrated_artifacts.pt"
 
 from stoikov_kv.cache import StoikovKVCache, load_or_create_artifacts
 from stoikov_kv.calibration import load_model_and_tokenizer as load_engine_model
@@ -40,8 +43,7 @@ def load_model_and_tokenizer():
         use_real_model=False,
     )
     
-    artifacts_path = ENGINE_ROOT / "calibrated_artifacts.pt"
-    _artifacts = load_or_create_artifacts(model, artifacts_path=str(artifacts_path), tokenizer=tokenizer)
+    _artifacts = load_or_create_artifacts(model, artifacts_path=str(ARTIFACTS_PATH), tokenizer=tokenizer)
     
     _model = model
     _tokenizer = tokenizer

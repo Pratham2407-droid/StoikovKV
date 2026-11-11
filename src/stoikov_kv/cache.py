@@ -426,8 +426,14 @@ def load_or_create_artifacts(
     device = dims["device"]
     dtype = dims["dtype"]
 
-    if artifacts_path and os.path.exists(artifacts_path):
-        loaded = torch.load(artifacts_path, map_location=device)
+    resolved_path = artifacts_path
+    if resolved_path and not os.path.exists(resolved_path):
+        alt = os.path.join("artifacts", os.path.basename(resolved_path))
+        if os.path.exists(alt):
+            resolved_path = alt
+
+    if resolved_path and os.path.exists(resolved_path):
+        loaded = torch.load(resolved_path, map_location=device)
         u_q = loaded.get("U_Q")
         if (
             isinstance(u_q, torch.Tensor)

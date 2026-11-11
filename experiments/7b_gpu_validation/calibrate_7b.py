@@ -13,6 +13,11 @@ from pathlib import Path
 import torch
 
 ROOT = Path(__file__).resolve().parent.parent.parent
+SRC_DIR = ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+RESULTS_DIR = ROOT / "benchmarks" / "results" / "7b_gpu_validation"
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -75,7 +80,7 @@ def main():
     print("\nRunning calibration (this may take 1-2 minutes)...")
     start_time = time.time()
     
-    artifacts_path = ROOT / "calibrated_artifacts_7b.pt"
+    artifacts_path = ROOT / "artifacts" / "calibrated_artifacts_7b.pt"
     artifacts = calibrate_model(
         model,
         tokenizer,
@@ -125,7 +130,7 @@ def main():
         "retrieval_diagnostics": artifacts.get("retrieval_diagnostics", {}),
     }
     
-    meta_path = Path(__file__).parent / "calibration_metadata.json"
+    meta_path = RESULTS_DIR / "calibration_metadata.json"
     meta_path.write_text(json.dumps(meta, indent=2))
     print(f"\nCalibration metadata saved to: {meta_path}")
 
