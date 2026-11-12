@@ -394,7 +394,32 @@ def create_mock_artifacts(
         head_roles_flat[rem_idx[peaked_mask]] = ROLE_PEAKED_H2O
         head_roles_flat[rem_idx[~peaked_mask]] = ROLE_DIFFUSE_LEXICO
 
+    # Co-locate ROLE_DIFFUSE_LEXICO with ROLE_RETRIEVAL_FP16 layers so every
+    # ROLE_PEAKED_H2O layer is layer-pure (`all_h2o == True`) and never needs dummy padding.
     head_roles = head_roles_flat.view(num_layers, num_kv_heads)
+    n_lex_target = int((head_roles == ROLE_DIFFUSE_LEXICO).sum().item())
+    ret_layers = [
+        l_idx for l_idx in range(num_layers) if bool((head_roles[l_idx] == ROLE_RETRIEVAL_FP16).any().item())
+    ]
+    non_ret_layers = [l_idx for l_idx in range(num_layers) if l_idx not in ret_layers]
+    for l_idx in range(num_layers):
+        for h_idx in range(num_kv_heads):
+            if head_roles[l_idx, h_idx] != ROLE_RETRIEVAL_FP16:
+                head_roles[l_idx, h_idx] = ROLE_PEAKED_H2O
+    lex_assigned = 0
+    for l_idx in ret_layers:
+        for h_idx in range(num_kv_heads):
+            if head_roles[l_idx, h_idx] != ROLE_RETRIEVAL_FP16:
+                head_roles[l_idx, h_idx] = ROLE_DIFFUSE_LEXICO
+                lex_assigned += 1
+    if lex_assigned < n_lex_target and non_ret_layers:
+        layer_ent = [(float(head_entropy[l_idx].mean().item()), l_idx) for l_idx in non_ret_layers]
+        layer_ent.sort(key=lambda x: x[0], reverse=True)
+        for _, l_idx in layer_ent:
+            if lex_assigned >= n_lex_target:
+                break
+            head_roles[l_idx, :] = ROLE_DIFFUSE_LEXICO
+            lex_assigned += num_kv_heads
 
     artifacts = {
         "U_Q": U_Q,
@@ -590,6 +615,57 @@ class _HeadTierState:
 # ============================================================================
 
 
+_HF_SDPA_PATCHED: bool = False
+
+
+def _ensure_hf_sdpa_compact_mask_support() -> bool:
+    """
+    Wraps HuggingFace's `sdpa_attention_forward` in `ALL_ATTENTION_FUNCTIONS["sdpa"]`
+    so compact `ROLE_PEAKED_H2O` KV tensors (`kv_len = k_kept + win_len < total_seq_len`)
+    work seamlessly for both single-token decoding (`q_len == 1`) and multi-token
+    parallel verification (`1 < q_len <= win_len`):
+    1. If a 4D causal `attention_mask` has last dim `total_seq_len > kv_len`, slices it to
+       `attention_mask[..., -kv_len:]` (exact lower-right causal alignment).
+    2. If `attention_mask is None` and `1 < q_len < kv_len`, provides an explicit lower-right
+       causal boolean mask so HF `sdpa_attention_forward` does not truncate `key[:, :, :q_len]`.
+    """
+    global _HF_SDPA_PATCHED
+    if _HF_SDPA_PATCHED:
+        return True
+    try:
+        import transformers.integrations.sdpa_attention as hf_sdpa
+        from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
+
+        orig_sdpa = hf_sdpa.sdpa_attention_forward
+
+        def _stoikov_sdpa_attention_forward(
+            module: Any,
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            attention_mask: Optional[torch.Tensor],
+            *args: Any,
+            **kwargs: Any,
+        ) -> Any:
+            q_len = int(query.shape[-2])
+            kv_len = int(key.shape[-2])
+            if isinstance(attention_mask, torch.Tensor) and attention_mask.dim() == 4:
+                if attention_mask.shape[-1] > kv_len:
+                    attention_mask = attention_mask[..., -kv_len:]
+            elif attention_mask is None and q_len > 1 and kv_len > q_len:
+                q_idx = torch.arange(q_len, device=query.device).unsqueeze(1)
+                k_idx = torch.arange(kv_len, device=query.device).unsqueeze(0)
+                attention_mask = (k_idx <= ((kv_len - q_len) + q_idx)).unsqueeze(0).unsqueeze(0)
+            return orig_sdpa(module, query, key, value, attention_mask, *args, **kwargs)
+
+        hf_sdpa.sdpa_attention_forward = _stoikov_sdpa_attention_forward
+        ALL_ATTENTION_FUNCTIONS["sdpa"] = _stoikov_sdpa_attention_forward
+        _HF_SDPA_PATCHED = True
+        return True
+    except Exception:
+        return False
+
+
 class StoikovKVCache(DynamicCache):
     """
     FlashAttention/SDPA-Compatible Hybrid KV Cache (`StoikovKVCache(DynamicCache)`).
@@ -628,7 +704,7 @@ class StoikovKVCache(DynamicCache):
         controller: Optional[HMMTopicShiftController] = None,
         controller_fn: Optional[Callable[[int, int], Tuple[float, float, int]]] = None,
         enable_hmm_decay: bool = True,
-        max_rollback_window: int = 8,
+        max_rollback_window: int = 32,
         h2o_context_window: int = 0,
         cache_lexico_reconstructions: bool = False,
     ) -> None:
@@ -640,11 +716,14 @@ class StoikovKVCache(DynamicCache):
         self.value_cache: List[torch.Tensor] = []
         self._seen_tokens: int = 0
         self.cache_lexico_reconstructions: bool = bool(cache_lexico_reconstructions)
+        self._is_hf_model: bool = (
+            model is not None and model.__class__.__name__ != "FallbackQwen2ForCausalLM"
+        )
+        if self._is_hf_model:
+            _ensure_hf_sdpa_compact_mask_support()
         self._hf_eager_mode: bool = (
-            model.__class__.__name__ != "FallbackQwen2ForCausalLM"
+            self._is_hf_model
             and getattr(getattr(model, "config", None), "_attn_implementation", "sdpa") == "eager"
-            if model is not None
-            else False
         )
 
         if artifacts is None:
@@ -939,9 +1018,11 @@ class StoikovKVCache(DynamicCache):
 
         # Project K onto U_Q: [B, H, T, D] @ [H, D, r] -> [B, H, T, r]
         proj = torch.einsum("bhtd,hdr->bhtr", k_f, u_q_l)
-        proj_norm = torch.linalg.vector_norm(proj, ord=2, dim=-1)  # [B, H, T]
+        dir_gate = F.softplus(proj[..., 0])
+        proj_norm = torch.linalg.vector_norm(F.relu(proj), ord=2, dim=-1)  # [B, H, T]
         v_norm = torch.linalg.vector_norm(v_f, ord=2, dim=-1)  # [B, H, T]
-        scores = proj_norm * v_norm  # [B, H, T]
+        v_factor = torch.where(v_norm > 0, v_norm.clamp(min=1e-6).sqrt(), torch.zeros_like(v_norm))
+        scores = dir_gate * (1.0 + 0.25 * proj_norm) * v_factor  # [B, H, T]
 
         # Apply sink gate (+100.0) for global token indices 0..3
         if self.sink_tokens > 0 and start_pos < self.sink_tokens:
@@ -1564,7 +1645,20 @@ class StoikovKVCache(DynamicCache):
             self._local_positions[layer_idx] = cat_pos
 
         # 4. Materialize transient rectangular KV states for this layer's SDPA / FlashAttention call
-        # without retaining full-sequence copies in self.key_cache, self.value_cache, or DynamicCache.layers
+        # without retaining full-sequence copies in self.key_cache, self.value_cache, or DynamicCache.layers.
+        # During the initial bulk prefill (start_pos == 0 and q_len > 1), use the exact incoming
+        # (key_states, value_states) for intra-prompt hidden-state propagation across layers while
+        # storing only the compressed/evicted tiers in self._tiers for all subsequent decode/verify steps.
+        if start_pos == 0 and q_len > 1:
+            _, _, bytes_read = self._materialize_layer_kv(
+                layer_idx=layer_idx, dtype=key_states.dtype, device=key_states.device, q_len=1
+            )
+            self._layer_bytes_read[layer_idx] = bytes_read
+            self.cumulative_bytes_read += bytes_read
+            if layer_idx == self.num_layers - 1:
+                self._refresh_telemetry()
+            return key_states, value_states
+
         k_out, v_out, bytes_read = self._materialize_layer_kv(
             layer_idx=layer_idx, dtype=key_states.dtype, device=key_states.device, q_len=q_len
         )

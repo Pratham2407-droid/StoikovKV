@@ -124,6 +124,7 @@ def matryoshka_speculative_generate(
     top_k: int = 32,
     seed: int = 42,
     strict_rejection_sampling: bool = False,
+    do_sample: bool = False,
 ) -> MatryoshkaSpecResult:
     """
     Runs Matryoshka Self-Speculative Decoding on `model` using `StoikovKVCache`.
@@ -175,6 +176,7 @@ def matryoshka_speculative_generate(
     draft_atoms = max(1, min(int(draft_atoms), int(verify_atoms)))
     verify_atoms = max(1, int(verify_atoms))
     max_new_tokens = max(1, int(max_new_tokens))
+    cache.max_rollback_window = max(int(getattr(cache, "max_rollback_window", 32)), gamma_spec + 4)
 
     was_training = model.training
     model.eval()
@@ -251,8 +253,11 @@ def matryoshka_speculative_generate(
                 q_dist = _logits_to_probs(
                     logits_q, temperature=temperature, top_k=top_k, suppress_ids=sup_step
                 )  # [1, V]
-                # Select highest-probability draft candidate deterministically / from q_dist
-                cand_tok = torch.argmax(q_dist, dim=-1, keepdim=True)  # [1, 1]
+                if strict_rejection_sampling and do_sample and temperature > 0.0:
+                    cand_cpu = torch.multinomial(q_dist.cpu(), num_samples=1, generator=gen)
+                    cand_tok = cand_cpu.to(device=device)
+                else:
+                    cand_tok = torch.argmax(q_dist, dim=-1, keepdim=True)  # [1, 1]
                 draft_ids.append(cand_tok)
                 q_probs_list.append(q_dist[0])  # [V]
                 logits_q_list.append(logits_q[0].detach().float())
@@ -308,13 +313,15 @@ def matryoshka_speculative_generate(
                 p_val = float(p_dist_j[tok_j].item())
 
                 # Exact speculative acceptance ratio min(1, p(x)/q(x))
-                token_ratio = (
-                    1.0
-                    if tok_j == int(torch.argmax(p_dist_j).item())
-                    else min(1.0, p_val / max(q_val, 1e-12))
-                )
+                is_greedy_match = tok_j == int(torch.argmax(p_dist_j).item())
+                token_ratio = 1.0 if is_greedy_match else min(1.0, p_val / max(q_val, 1e-12))
                 if strict_rejection_sampling:
-                    accept_prob = token_ratio
+                    if not do_sample or temperature <= 0.0:
+                        # Lossless greedy verification: accept iff draft token matches target argmax
+                        accept_prob = 1.0 if is_greedy_match else 0.0
+                    else:
+                        # Lossless Leviathan et al. (2023) speculative rejection sampling
+                        accept_prob = min(1.0, p_val / max(q_val, 1e-12))
                 else:
                     tv_overlap = float(torch.sum(torch.minimum(p_dist_j, q_dist_j)).item())
                     l_diff = float(torch.norm(logits_p_all[0, j].float() - logits_q_list[j], p=2).item())
@@ -333,13 +340,21 @@ def matryoshka_speculative_generate(
                 else:
                     # First rejection at index j:
                     # Sample a corrected token from norm(max(0, p_probs[j] - q_probs[j]))
-                    residual = torch.relu(p_dist_j - q_dist_j)
-                    res_sum = float(residual.sum().item())
-                    if res_sum > 1e-12:
-                        res_probs = residual / res_sum
-                        corr_tok = int(torch.argmax(res_probs).item())
-                    else:
+                    if strict_rejection_sampling and (not do_sample or temperature <= 0.0):
                         corr_tok = int(torch.argmax(p_dist_j).item())
+                    else:
+                        residual = torch.relu(p_dist_j - q_dist_j)
+                        res_sum = float(residual.sum().item())
+                        if res_sum > 1e-12:
+                            res_probs = residual / res_sum
+                            if strict_rejection_sampling and do_sample:
+                                corr_tok = int(
+                                    torch.multinomial(res_probs.cpu(), num_samples=1, generator=gen).item()
+                                )
+                            else:
+                                corr_tok = int(torch.argmax(res_probs).item())
+                        else:
+                            corr_tok = int(torch.argmax(p_dist_j).item())
 
                     generated_tokens.append(corr_tok)
                     # Roll back rejected draft states from the cache:
@@ -368,7 +383,10 @@ def matryoshka_speculative_generate(
                         top_k=top_k,
                         suppress_ids=sup_bonus,
                     )[0]
-                    bonus_tok = int(torch.argmax(p_bonus).item())
+                    if strict_rejection_sampling and do_sample and temperature > 0.0:
+                        bonus_tok = int(torch.multinomial(p_bonus.cpu(), num_samples=1, generator=gen).item())
+                    else:
+                        bonus_tok = int(torch.argmax(p_bonus).item())
                     generated_tokens.append(bonus_tok)
                     last_token = torch.tensor([[bonus_tok]], dtype=torch.long, device=device)
                 else:
@@ -476,6 +494,8 @@ def matryoshka_speculative_generate(
             "total_drafted_tokens": total_drafted,
             "total_accepted_draft_tokens": total_accepted_from_draft,
             "kv_bytes_read_per_token": effective_kv_bytes_per_token,
+            "analytical_subvector_kv_bytes_per_token": effective_kv_bytes_per_token,
+            "measured_py_decode_bytes_per_token": float(decode_bytes_read_total) / float(max(1, num_gen)),
             "raw_decode_bytes_read_per_token": float(decode_bytes_read_total) / float(max(1, num_gen)),
             "standard_decode_kv_bytes_per_token": standard_lexico_decode_bytes_per_token,
             "standard_fp16_kv_bytes_per_token": standard_fp16_bytes_per_token,

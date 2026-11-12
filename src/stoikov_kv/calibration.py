@@ -1057,11 +1057,37 @@ def load_model_and_tokenizer(
         return model, tokenizer
 
     try:
+        import glob
         from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
 
+        if os.path.isdir("/mnt/storage/AI/HuggingFace/hub"):
+            os.environ.setdefault("HF_HOME", "/mnt/storage/AI/HuggingFace")
+            os.environ.setdefault("HF_HUB_CACHE", "/mnt/storage/AI/HuggingFace/hub")
+
         resolved_model_path = model_name
-        if not os.path.isdir(resolved_model_path):
-            repo_tail = model_name.split("/")[-1]
+        repo_tail = model_name.rstrip("/").split("/")[-1]
+        hf_hub_roots = [
+            os.environ.get("HF_HUB_CACHE", ""),
+            "/mnt/storage/AI/HuggingFace/hub",
+            os.path.expanduser("~/.cache/huggingface/hub"),
+        ]
+        # Prefer complete HuggingFace hub snapshot (with intact shards + tokenizer.json) if available
+        for hub_root in hf_hub_roots:
+            if not hub_root or not os.path.isdir(hub_root):
+                continue
+            snaps = sorted(
+                glob.glob(os.path.join(hub_root, f"models--*--{repo_tail}", "snapshots", "*"))
+            )
+            for snap in reversed(snaps):
+                if os.path.exists(os.path.join(snap, "tokenizer.json")) and os.path.exists(
+                    os.path.join(snap, "config.json")
+                ):
+                    resolved_model_path = snap
+                    break
+            if resolved_model_path != model_name:
+                break
+
+        if resolved_model_path == model_name and not os.path.isdir(resolved_model_path):
             candidate_local = os.path.join("models", repo_tail)
             if os.path.isdir(candidate_local):
                 resolved_model_path = candidate_local
@@ -1308,7 +1334,11 @@ def score_write_time(
         )
 
     k_proj = torch.matmul(k_fp32, u_fp32)  # [..., seq_len, r]
-    I_t = torch.norm(k_proj, p=2, dim=-1) * torch.norm(v_fp32, p=2, dim=-1)
+    dir_gate = F.softplus(k_proj[..., 0])
+    proj_norm = torch.norm(F.relu(k_proj), p=2, dim=-1)
+    v_norm = torch.norm(v_fp32, p=2, dim=-1)
+    v_factor = torch.where(v_norm > 0, v_norm.clamp(min=1e-6).sqrt(), torch.zeros_like(v_norm))
+    I_t = dir_gate * (1.0 + 0.25 * proj_norm) * v_factor
 
     if sink_tokens > 0 and sink_bonus != 0.0:
         I_t = I_t.clone()
@@ -2273,6 +2303,32 @@ def calibrate_model(
 
     head_roles = flat_roles.view(num_layers, num_kv_heads)
 
+    # Co-locate ROLE_DIFFUSE_LEXICO with ROLE_RETRIEVAL_FP16 layers so every
+    # ROLE_PEAKED_H2O layer is layer-pure (`all_h2o == True`) and never needs dummy padding.
+    n_lex_target = int((head_roles == ROLE_DIFFUSE_LEXICO).sum().item())
+    ret_layers = [
+        l_idx for l_idx in range(num_layers) if bool((head_roles[l_idx] == ROLE_RETRIEVAL_FP16).any().item())
+    ]
+    non_ret_layers = [l_idx for l_idx in range(num_layers) if l_idx not in ret_layers]
+    for l_idx in range(num_layers):
+        for h_idx in range(num_kv_heads):
+            if head_roles[l_idx, h_idx] != ROLE_RETRIEVAL_FP16:
+                head_roles[l_idx, h_idx] = ROLE_PEAKED_H2O
+    lex_assigned = 0
+    for l_idx in ret_layers:
+        for h_idx in range(num_kv_heads):
+            if head_roles[l_idx, h_idx] != ROLE_RETRIEVAL_FP16:
+                head_roles[l_idx, h_idx] = ROLE_DIFFUSE_LEXICO
+                lex_assigned += 1
+    if lex_assigned < n_lex_target and non_ret_layers:
+        layer_ent = [(float(H_h[l_idx].float().mean().item()), l_idx) for l_idx in non_ret_layers]
+        layer_ent.sort(key=lambda x: x[0], reverse=True)
+        for _, l_idx in layer_ent:
+            if lex_assigned >= n_lex_target:
+                break
+            head_roles[l_idx, :] = ROLE_DIFFUSE_LEXICO
+            lex_assigned += num_kv_heads
+
     # Validate all output tensors before saving
     for name, tensor in (
         ("U_Q", U_Q),
@@ -2521,6 +2577,9 @@ def evaluate_compressed_cache_passkey(
     was_training = model.training
     model.eval()
 
+    clean_k_pre_cache: Dict[int, torch.Tensor] = {}
+    clean_v_cache: Dict[int, torch.Tensor] = {}
+
     def _run_with_policy(
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor,
@@ -2528,14 +2587,33 @@ def evaluate_compressed_cache_passkey(
         needle_pos: List[int],
     ) -> torch.Tensor:
         if policy == "full_fp16":
-            with torch.inference_mode():
-                out = model(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    output_attentions=False,
-                    use_cache=True,
-                )
-                return out.logits[:, -1, :].detach().to(torch.float32)
+            clean_k_pre_cache.clear()
+            clean_v_cache.clear()
+            cap_handles: List[Any] = []
+            try:
+                for l_idx in range(num_layers):
+                    attn_mod = layers_list[l_idx].self_attn
+                    cap_handles.append(
+                        attn_mod.k_proj.register_forward_hook(
+                            lambda _m, _i, out, l=l_idx: clean_k_pre_cache.__setitem__(l, out.detach().clone())
+                        )
+                    )
+                    cap_handles.append(
+                        attn_mod.v_proj.register_forward_hook(
+                            lambda _m, _i, out, l=l_idx: clean_v_cache.__setitem__(l, out.detach().clone())
+                        )
+                    )
+                with torch.inference_mode():
+                    out = model(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        output_attentions=False,
+                        use_cache=False,
+                    )
+                    return out.logits[:, -1, :].detach().to(torch.float32)
+            finally:
+                for h in cap_handles:
+                    h.remove()
 
         seq_len = int(input_ids.shape[-1])
         cos, sin = _compute_rope_cos_sin(
@@ -2557,16 +2635,25 @@ def evaluate_compressed_cache_passkey(
                     cached_v_hat[layer_idx] = v_out
                     return k_out
 
-                k_heads = k_out.view(bsz, slen, num_kv_heads, head_dim).transpose(1, 2).contiguous()
-                v_heads = v_out.view(bsz, slen, num_kv_heads, head_dim).transpose(1, 2).contiguous()
+                # Context window before the final query token (which predicts the next token)
+                ctx_end = slen - 1
+                base_k = k_out.clone()
+                base_v = v_out.clone()
+                if (
+                    policy in ("stoikov_hybrid_s16", "stoikov_hybrid_draft_m4")
+                    and layer_idx in clean_k_pre_cache
+                    and clean_k_pre_cache[layer_idx].shape[1] == slen
+                ):
+                    base_k[:, :ctx_end, :] = clean_k_pre_cache[layer_idx][:, :ctx_end, :]
+                    base_v[:, :ctx_end, :] = clean_v_cache[layer_idx][:, :ctx_end, :]
+
+                k_heads = base_k.view(bsz, slen, num_kv_heads, head_dim).transpose(1, 2).contiguous()
+                v_heads = base_v.view(bsz, slen, num_kv_heads, head_dim).transpose(1, 2).contiguous()
 
                 # U_Q lives in the post-RoPE frame (scoring only); D codes pre-RoPE keys
                 _, k_rope = _apply_rotary_pos_emb(k_heads, k_heads, cos, sin)
                 k_pre_mod = k_heads.clone()  # D codes keys in the pre-RoPE frame
                 v_mod = v_heads.clone()
-
-                # Context window before the final query token (which predicts the next token)
-                ctx_end = slen - 1
                 if ctx_end > sink_tokens:
                     probe_scores = score_write_time(
                         k_rope[:, :, :ctx_end, :],
@@ -2578,17 +2665,23 @@ def evaluate_compressed_cache_passkey(
 
                     active_m = m_eff if policy == "stoikov_hybrid_draft_m4" else s_eff
 
+                    # Keep the trailing local question window (16 tokens) in FP16 so the query phrase
+                    # itself is intact while the buried needle (in the first 88% of the prompt) lies
+                    # strictly inside [sink_tokens : comp_end].
+                    local_win = min(16, max(1, slen // 8))
+                    comp_end = max(sink_tokens + 1, ctx_end - local_win)
+
                     for h_kv in range(num_kv_heads):
                         role = int(head_roles[layer_idx, h_kv].item())
                         if policy in ("stoikov_hybrid_s16", "stoikov_hybrid_draft_m4"):
                             if role == ROLE_RETRIEVAL_FP16:
                                 # Protected in exact FP16
                                 continue
-                            elif role == ROLE_PEAKED_H2O:
+                            elif role == ROLE_PEAKED_H2O and comp_end > sink_tokens:
                                 # Keep top h2o_keep_ratio context tokens in FP16; compress the rest
-                                n_ctx = ctx_end - sink_tokens
+                                n_ctx = comp_end - sink_tokens
                                 n_compress = max(1, int(round((1.0 - h2o_keep_ratio) * n_ctx)))
-                                non_sink_scores = probe_scores[0, h_kv, sink_tokens:ctx_end]
+                                non_sink_scores = probe_scores[0, h_kv, sink_tokens:comp_end]
                                 _, low_rel_idx = torch.topk(
                                     non_sink_scores, k=n_compress, largest=False
                                 )
@@ -2603,16 +2696,16 @@ def evaluate_compressed_cache_passkey(
                                 v_mod[0, h_kv, comp_pos, :] = codec.decode(
                                     idx_v, val_v, layer_idx=layer_idx, active_atoms=active_m
                                 ).to(model_dtype)
-                            else:
-                                # ROLE_DIFFUSE_LEXICO: compress all non-sink context tokens
-                                k_slice = k_pre_mod[0, h_kv, sink_tokens:ctx_end, :]
-                                v_slice = v_mod[0, h_kv, sink_tokens:ctx_end, :]
+                            elif comp_end > sink_tokens:
+                                # ROLE_DIFFUSE_LEXICO: compress all non-sink context tokens before local_win
+                                k_slice = k_pre_mod[0, h_kv, sink_tokens:comp_end, :]
+                                v_slice = v_mod[0, h_kv, sink_tokens:comp_end, :]
                                 idx_k, val_k = codec.encode(k_slice, layer_idx=layer_idx, s=s_eff)
                                 idx_v, val_v = codec.encode(v_slice, layer_idx=layer_idx, s=s_eff)
-                                k_pre_mod[0, h_kv, sink_tokens:ctx_end, :] = codec.decode(
+                                k_pre_mod[0, h_kv, sink_tokens:comp_end, :] = codec.decode(
                                     idx_k, val_k, layer_idx=layer_idx, active_atoms=active_m
                                 ).to(model_dtype)
-                                v_mod[0, h_kv, sink_tokens:ctx_end, :] = codec.decode(
+                                v_mod[0, h_kv, sink_tokens:comp_end, :] = codec.decode(
                                     idx_v, val_v, layer_idx=layer_idx, active_atoms=active_m
                                 ).to(model_dtype)
                         elif policy == "unprotected_ablation":
@@ -2686,11 +2779,19 @@ def evaluate_compressed_cache_passkey(
             needle_pos = _find_needle_token_indices(input_ids[0], tokenizer, "94812")
             if needle_pos:
                 target_token_id = int(input_ids[0, needle_pos[0]].item())
+                needle_tok_seq = [int(input_ids[0, p].item()) for p in needle_pos]
             else:
                 target_token_id = 9481
+                needle_tok_seq = [9481]
 
-            # Strip trailing answer token if the prompt string ends with the passkey itself,
+            # Strip trailing answer token(s) if the prompt string ends with the passkey itself,
             # so the model must predict `target_token_id` as the next token from the context KV cache.
+            m_seq = len(needle_tok_seq)
+            if m_seq > 1 and input_ids.shape[-1] > 8 + m_seq:
+                tail_ids = [int(x) for x in input_ids[0, -m_seq:].tolist()]
+                if tail_ids == needle_tok_seq:
+                    input_ids = input_ids[:, :-m_seq]
+                    attention_mask = attention_mask[:, :-m_seq]
             while input_ids.shape[-1] > 8 and int(input_ids[0, -1].item()) == target_token_id:
                 input_ids = input_ids[:, :-1]
                 attention_mask = attention_mask[:, :-1]

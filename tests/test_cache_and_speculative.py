@@ -195,6 +195,11 @@ class TestPerson2LiveInference(unittest.TestCase):
 
         # Lexico heads must not retain uncompressed FP16 reconstructions by default
         for l_idx in range(cache.num_layers):
+            roles_l = cache.head_roles[l_idx]
+            has_h2o = bool((roles_l == ROLE_PEAKED_H2O).any().item())
+            all_h2o = bool((roles_l == ROLE_PEAKED_H2O).all().item())
+            # Every layer containing an H2O head must be 100% pure H2O so anti_k is never needed
+            self.assertEqual(has_h2o, all_h2o)
             for h_idx in range(cache.num_kv_heads):
                 st = cache._tiers[l_idx][h_idx]
                 if st.role == ROLE_DIFFUSE_LEXICO:
@@ -275,9 +280,28 @@ class TestPerson2LiveInference(unittest.TestCase):
             verify_atoms=8,
             max_new_tokens=10,
             strict_rejection_sampling=True,
+            do_sample=False,
         )
         self.assertEqual(len(res["generated_ids"]), 10)
         self.assertEqual(cache.get_seq_length(0), 32 + 10)
+
+        res_stoch = matryoshka_speculative_generate(
+            model=self.model,
+            tokenizer=self.tokenizer,
+            prompt=prompt_ids,
+            cache=cache,
+            gamma_spec=4,
+            draft_atoms=4,
+            verify_atoms=8,
+            max_new_tokens=10,
+            strict_rejection_sampling=True,
+            do_sample=True,
+            temperature=0.7,
+        )
+        self.assertEqual(len(res_stoch["generated_ids"]), 10)
+        self.assertEqual(cache.get_seq_length(0), 32 + 10)
+        self.assertIn("analytical_subvector_kv_bytes_per_token", res_stoch)
+        self.assertIn("measured_py_decode_bytes_per_token", res_stoch)
 
     def test_09_p4_openai_server_and_cli(self) -> None:
         """Verifies P4 StoikovInferenceEngine OpenAI routes and CLI entrypoint."""
