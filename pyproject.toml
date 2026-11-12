@@ -36,6 +36,9 @@ dev = [
   "pytest>=8.0.0",
 ]
 
+[project.scripts]
+stoikov = "stoikov_kv.cli:main"
+
 [tool.setuptools]
 package-dir = { "" = "src" }
 

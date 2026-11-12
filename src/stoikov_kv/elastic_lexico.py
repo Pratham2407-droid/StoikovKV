@@ -392,7 +392,7 @@ class ElasticLexicoCodec:
         }
 
     def _validate_encode_inputs(
-        self, X: torch.Tensor, layer_idx: int, s: int
+        self, X: torch.Tensor, layer_idx: int, s: int, validate_finite: bool = True
     ) -> None:
         if not isinstance(X, torch.Tensor) or X.numel() == 0:
             raise ValueError("Input X must be a non-empty torch.Tensor.")
@@ -408,7 +408,7 @@ class ElasticLexicoCodec:
             raise ValueError(
                 f"Sparsity s={s} must be in [1, n_atoms={self.n_atoms}]."
             )
-        if not torch.isfinite(X).all():
+        if validate_finite and not torch.isfinite(X).all():
             raise ValueError("Input X contains NaN or Inf values.")
 
     def _raw_reconstruct(
@@ -428,6 +428,7 @@ class ElasticLexicoCodec:
         s: int = 16,
         lambda1: float = 0.04,
         norm_rescale: bool = True,
+        validate_finite: bool = True,
     ) -> Tuple[torch.Tensor, QuantizedInt8Values]:
         """
         Fast 1-Step Approximate Ridge + Soft-Thresholding Sparse Encoder:
@@ -443,7 +444,7 @@ class ElasticLexicoCodec:
         selecting the largest-magnitude thresholded ridge coefficients in one step does not
         solve the iterative ElasticNet objective exactly.
         """
-        self._validate_encode_inputs(X, layer_idx=layer_idx, s=s)
+        self._validate_encode_inputs(X, layer_idx=layer_idx, s=s, validate_finite=validate_finite)
         if lambda1 < 0.0:
             raise ValueError(f"lambda1 must be >= 0, got {lambda1}.")
 
@@ -671,6 +672,7 @@ class ElasticLexicoCodec:
         layer_idx: int = 0,
         active_atoms: Optional[int] = None,
         scale: Optional[torch.Tensor] = None,
+        check_bounds: bool = True,
     ) -> torch.Tensor:
         """
         Full and Nested Partial Sparse Decoder:
@@ -697,7 +699,7 @@ class ElasticLexicoCodec:
             m = s_total
 
         idx_m = indices[..., :m].to(device=self.device, dtype=torch.long)
-        if int(idx_m.min().item()) < 0 or int(idx_m.max().item()) >= self.n_atoms:
+        if check_bounds and (int(idx_m.min().item()) < 0 or int(idx_m.max().item()) >= self.n_atoms):
             raise ValueError(
                 f"Atom index out of bounds [0, {self.n_atoms - 1}]: "
                 f"min={int(idx_m.min().item())}, max={int(idx_m.max().item())}."

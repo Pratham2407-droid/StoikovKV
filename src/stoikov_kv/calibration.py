@@ -301,7 +301,7 @@ class FallbackQwen2Config(PretrainedConfig):
     rope_theta: float = 1000000.0
     max_position_embeddings: int = 32768
     output_attentions: bool = True
-    _attn_implementation: str = "eager"
+    _attn_implementation: str = "sdpa"
 
     def __post_init__(self) -> None:
         if self.head_dim is None:
@@ -532,11 +532,16 @@ class FallbackQwen2Attention(nn.Module):
         kv_len = int(k_rep.shape[-2])
 
         if not output_attentions:
-            if q_len == 1 and attention_mask is None:
+            has_padding = (
+                attention_mask is not None
+                and attention_mask.numel() > 0
+                and not bool(torch.all(attention_mask != 0).item())
+            )
+            if q_len == 1 and not has_padding:
                 attn_output = F.scaled_dot_product_attention(
                     q_rope, k_rep, v_rep, attn_mask=None, dropout_p=0.0, is_causal=False
                 )
-            elif q_len == kv_len and attention_mask is None:
+            elif q_len == kv_len and not has_padding:
                 attn_output = F.scaled_dot_product_attention(
                     q_rope, k_rep, v_rep, attn_mask=None, dropout_p=0.0, is_causal=True
                 )
@@ -545,14 +550,15 @@ class FallbackQwen2Attention(nn.Module):
                 k_idx = torch.arange(kv_len, device=q_rope.device).unsqueeze(0)
                 causal_bool = k_idx <= ((kv_len - q_len) + q_idx)
                 attn_mask = causal_bool.unsqueeze(0).unsqueeze(0)
-                if attention_mask is not None and attention_mask.shape[-1] == kv_len:
+                if has_padding and attention_mask is not None and attention_mask.shape[-1] == kv_len:
                     attn_mask = attn_mask & (attention_mask != 0).unsqueeze(1).unsqueeze(2)
                 attn_output = F.scaled_dot_product_attention(
                     q_rope, k_rep, v_rep, attn_mask=attn_mask, dropout_p=0.0, is_causal=False
                 )
             attn_output = attn_output.transpose(1, 2).contiguous().view(bsz, q_len, self.hidden_size)
             attn_output = self.o_proj(attn_output)
-            return attn_output, None, (k_rope, v)
+            kv_ret = None if past_key_value is not None else (k_rope, v)
+            return attn_output, None, kv_ret
 
         scores = torch.matmul(q_rope.float(), k_rep.float().transpose(-1, -2)) / math.sqrt(self.head_dim)
 
@@ -570,7 +576,8 @@ class FallbackQwen2Attention(nn.Module):
         attn_output = torch.matmul(attn_weights.float(), v_rep.float()).to(hidden_states.dtype)
         attn_output = attn_output.transpose(1, 2).contiguous().view(bsz, q_len, self.hidden_size)
         attn_output = self.o_proj(attn_output)
-        return attn_output, (attn_weights if output_attentions else None), (k_rope, v)
+        kv_ret = None if past_key_value is not None else (k_rope, v)
+        return attn_output, (attn_weights if output_attentions else None), kv_ret
 
 
 class FallbackQwen2DecoderLayer(nn.Module):
@@ -831,7 +838,7 @@ class FallbackQwen2ForCausalLM(nn.Module):
             )
             if output_attentions and attn_w is not None:
                 all_attns.append(attn_w)
-            if use_cache:
+            if use_cache and past_key_values is None and kv is not None:
                 past_kv.append(kv)
 
         # Return full sequence logits when q_len <= 64 (supports single-step decoding and parallel
@@ -859,55 +866,48 @@ class FallbackQwen2ForCausalLM(nn.Module):
         pad_token_id: Optional[int] = None,
         eos_token_id: Optional[int] = None,
         use_cache: bool = True,
+        past_key_values: Optional[Any] = None,
+        attention_mask: Optional[torch.Tensor] = None,
         **kwargs: Any,
     ) -> torch.Tensor:
         """
-        Generate tokens autoregressively.
-        
-        Args:
-            input_ids: Input token IDs [batch, seq_len]
-            max_new_tokens: Maximum number of new tokens to generate
-            do_sample: Whether to use sampling (if False, greedy decoding)
-            temperature: Sampling temperature
-            top_k: Top-k sampling
-            top_p: Top-p (nucleus) sampling
-            pad_token_id: Pad token ID
-            eos_token_id: EOS token ID
-            use_cache: Whether to use KV cache
-            
-        Returns:
-            Generated token IDs [batch, seq_len + max_new_tokens]
+        Generate tokens autoregressively with optional `past_key_values` (`StoikovKVCache`).
         """
-        batch_size = input_ids.shape[0]
-        device = self.device
-        dtype = self.dtype
-        
         if pad_token_id is None:
             pad_token_id = getattr(self.config, "pad_token_id", 0)
         if eos_token_id is None:
             eos_token_id = getattr(self.config, "eos_token_id", 1)
-        
-        past_key_values = None
+
         generated = input_ids.clone()
-        
+        cur_mask = attention_mask
+
         for _ in range(max_new_tokens):
+            if past_key_values is None:
+                step_input = generated
+            elif hasattr(past_key_values, "get_seq_length"):
+                past_seen = int(past_key_values.get_seq_length(0))
+                step_input = generated if past_seen == 0 else generated[:, past_seen:]
+                if step_input.shape[1] == 0:
+                    step_input = generated[:, -1:]
+            else:
+                step_input = generated[:, -1:]
+
             out = self.forward(
-                input_ids=generated if past_key_values is None else generated[:, -1:],
+                input_ids=step_input,
+                attention_mask=cur_mask,
                 past_key_values=past_key_values,
                 use_cache=use_cache,
                 output_attentions=False,
             )
-            
+
             past_key_values = out.past_key_values
             next_token_logits = out.logits[:, -1, :] / max(temperature, 1e-8)
-            
+
             if do_sample:
-                # Apply top-k
                 if top_k > 0:
                     indices_to_remove = next_token_logits < torch.topk(next_token_logits, top_k)[0][..., -1:]
                     next_token_logits[indices_to_remove] = float("-inf")
-                
-                # Apply top-p
+
                 if top_p < 1.0:
                     sorted_logits, sorted_indices = torch.sort(next_token_logits, descending=True)
                     cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
@@ -916,18 +916,107 @@ class FallbackQwen2ForCausalLM(nn.Module):
                     sorted_indices_to_remove[..., 0] = 0
                     indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
                     next_token_logits[indices_to_remove] = float("-inf")
-                
+
                 probs = F.softmax(next_token_logits, dim=-1)
                 next_tokens = torch.multinomial(probs, num_samples=1)
             else:
                 next_tokens = torch.argmax(next_token_logits, dim=-1, keepdim=True)
-            
+
             generated = torch.cat([generated, next_tokens], dim=-1)
-            
+            if cur_mask is not None:
+                cur_mask = torch.cat(
+                    [cur_mask, torch.ones((cur_mask.shape[0], 1), dtype=cur_mask.dtype, device=cur_mask.device)],
+                    dim=-1,
+                )
+
             if (next_tokens == eos_token_id).all():
                 break
-        
+
         return generated
+
+
+def _ensure_local_qwen_checkpoint_metadata(model_dir: str) -> None:
+    """
+    If `model_dir` is a local directory containing `model-*-of-*.safetensors` shards
+    without `model.safetensors.index.json` or `config.json`, reconstructs both files
+    directly from the safetensors JSON headers so `AutoModelForCausalLM.from_pretrained`
+    can load the local checkpoint offline without error.
+    """
+    import glob
+    import struct
+
+    if not os.path.isdir(model_dir):
+        return
+    shards = sorted(glob.glob(os.path.join(model_dir, "model-*-of-*.safetensors")))
+    if not shards:
+        return
+
+    index_path = os.path.join(model_dir, "model.safetensors.index.json")
+    config_path = os.path.join(model_dir, "config.json")
+    if os.path.exists(index_path) and os.path.exists(config_path):
+        return
+
+    weight_map: Dict[str, str] = {}
+    shapes: Dict[str, List[int]] = {}
+    total_size = 0
+    for shard_path in shards:
+        shard_name = os.path.basename(shard_path)
+        total_size += os.path.getsize(shard_path)
+        with open(shard_path, "rb") as f:
+            header_len = struct.unpack("<Q", f.read(8))[0]
+            header = json.loads(f.read(header_len).decode("utf-8"))
+        for k, v in header.items():
+            if k == "__metadata__":
+                continue
+            weight_map[k] = shard_name
+            if isinstance(v, dict) and "shape" in v:
+                shapes[k] = list(v["shape"])
+
+    if not os.path.exists(index_path) and weight_map:
+        with open(index_path, "w", encoding="utf-8") as f:
+            json.dump({"metadata": {"total_size": total_size}, "weight_map": weight_map}, f, indent=2)
+
+    if not os.path.exists(config_path) and "model.embed_tokens.weight" in shapes:
+        vocab_size, hidden_size = shapes["model.embed_tokens.weight"]
+        inter_size = shapes.get("model.layers.0.mlp.gate_proj.weight", [18944, hidden_size])[0]
+        q_out = shapes.get("model.layers.0.self_attn.q_proj.weight", [hidden_size, hidden_size])[0]
+        k_out = shapes.get("model.layers.0.self_attn.k_proj.weight", [512, hidden_size])[0]
+        head_dim = 128
+        num_q_heads = q_out // head_dim
+        num_kv_heads = k_out // head_dim
+        layer_indices = [
+            int(k.split(".")[2])
+            for k in weight_map
+            if k.startswith("model.layers.") and k.split(".")[2].isdigit()
+        ]
+        num_layers = (max(layer_indices) + 1) if layer_indices else 28
+        cfg_dict = {
+            "architectures": ["Qwen2ForCausalLM"],
+            "attention_dropout": 0.0,
+            "bos_token_id": 151643,
+            "eos_token_id": 151645,
+            "hidden_act": "silu",
+            "hidden_size": int(hidden_size),
+            "initializer_range": 0.02,
+            "intermediate_size": int(inter_size),
+            "max_position_embeddings": 32768,
+            "max_window_layers": int(num_layers),
+            "model_type": "qwen2",
+            "num_attention_heads": int(num_q_heads),
+            "num_hidden_layers": int(num_layers),
+            "num_key_value_heads": int(num_kv_heads),
+            "rms_norm_eps": 1e-6,
+            "rope_theta": 1000000.0,
+            "sliding_window": 131072,
+            "tie_word_embeddings": False,
+            "torch_dtype": "bfloat16",
+            "transformers_version": "4.43.1",
+            "use_cache": True,
+            "use_sliding_window": False,
+            "vocab_size": int(vocab_size),
+        }
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(cfg_dict, f, indent=2)
 
 
 def load_model_and_tokenizer(
@@ -942,6 +1031,7 @@ def load_model_and_tokenizer(
     bnb_4bit_use_double_quant: bool = True,
     use_quanto: bool = False,
     quanto_dtype: str = "int4",
+    attn_implementation: str = "sdpa",
 ) -> Tuple[nn.Module, Any]:
     """
     Loads a deterministic structured fallback by default.  Set
@@ -969,8 +1059,28 @@ def load_model_and_tokenizer(
     try:
         from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
 
-        tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-        if tokenizer.pad_token is None:
+        resolved_model_path = model_name
+        if not os.path.isdir(resolved_model_path):
+            repo_tail = model_name.split("/")[-1]
+            candidate_local = os.path.join("models", repo_tail)
+            if os.path.isdir(candidate_local):
+                resolved_model_path = candidate_local
+
+        if os.path.isdir(resolved_model_path):
+            _ensure_local_qwen_checkpoint_metadata(resolved_model_path)
+
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(resolved_model_path, trust_remote_code=True)
+        except Exception:
+            hf_tok_id = "Qwen/Qwen2.5-7B-Instruct" if "7b" in model_name.lower() else "Qwen/Qwen2.5-1.5B-Instruct"
+            try:
+                tokenizer = AutoTokenizer.from_pretrained(hf_tok_id, trust_remote_code=True)
+            except Exception:
+                with open(os.path.join(resolved_model_path, "config.json"), "r", encoding="utf-8") as f:
+                    v_sz = int(json.load(f).get("vocab_size", 151936))
+                tokenizer = FallbackQwen2Tokenizer(vocab_size=v_sz)
+
+        if getattr(tokenizer, "pad_token", None) is None and hasattr(tokenizer, "eos_token"):
             tokenizer.pad_token = tokenizer.eos_token
         
         # Use low_cpu_mem_usage and device_map with max_memory for 6GB VRAM
@@ -1010,14 +1120,14 @@ def load_model_and_tokenizer(
             "device_map": device_map,
             "max_memory": max_memory,
             "low_cpu_mem_usage": True,
-            "attn_implementation": "eager",
+            "attn_implementation": attn_implementation,
             "trust_remote_code": True,
         }
         if quantization_config is not None:
             model_kwargs["quantization_config"] = quantization_config
         
         model = AutoModelForCausalLM.from_pretrained(
-            model_name,
+            resolved_model_path,
             **model_kwargs,
         )
         
@@ -1656,6 +1766,109 @@ def _find_needle_token_indices(
 # ============================================================================
 
 
+@torch.no_grad()
+def _compute_streaming_layer_attention_stats(
+    q_rope: torch.Tensor,
+    k_rope: torch.Tensor,
+    num_kv_heads: int,
+    q_per_kv: int,
+    attention_mask: Optional[torch.Tensor] = None,
+    needle_indices: Optional[Sequence[int]] = None,
+    distractor_indices: Optional[Sequence[int]] = None,
+    query_block_size: int = 128,
+) -> Dict[str, Any]:
+    """
+    Computes exact causal attention statistics per layer directly from post-RoPE
+    `(q_rope, k_rope)` in streaming query blocks (`O(query_block_size * seq_len)` memory)
+    without requiring `output_attentions=True` or materializing 4D `[B, H_q, T, T]`
+    attention matrices across the model.
+    """
+    bsz, num_q_heads, seq_len, head_dim = q_rope.shape
+    device = q_rope.device
+    scale = 1.0 / math.sqrt(float(head_dim))
+    k_rep = _repeat_kv(k_rope, q_per_kv).to(torch.float32)
+    q_f = q_rope.to(torch.float32)
+
+    key_received_q = torch.zeros((bsz, num_q_heads, seq_len), device=device, dtype=torch.float32)
+    ent_sum = torch.zeros((bsz, num_q_heads), device=device, dtype=torch.float32)
+    ent_count = 0
+    ent_q_min = 2 if seq_len > 2 else 0
+    eps = 1e-7
+
+    for q_start in range(0, seq_len, query_block_size):
+        q_end = min(seq_len, q_start + query_block_size)
+        q_blk = q_f[:, :, q_start:q_end, :]
+        k_blk = k_rep[:, :, :q_end, :]
+
+        scores = torch.matmul(q_blk, k_blk.transpose(-1, -2)) * scale
+        q_idx = torch.arange(q_start, q_end, device=device).unsqueeze(1)
+        k_idx = torch.arange(0, q_end, device=device).unsqueeze(0)
+        causal_mask = (k_idx > q_idx).unsqueeze(0).unsqueeze(0)
+        scores = scores.masked_fill(causal_mask, float("-inf"))
+
+        if attention_mask is not None and attention_mask.shape[-1] >= q_end:
+            key_pad = (attention_mask[:, :q_end] == 0).unsqueeze(1).unsqueeze(2)
+            scores = scores.masked_fill(key_pad, float("-inf"))
+
+        probs = torch.softmax(scores, dim=-1)
+        if attention_mask is not None and attention_mask.shape[-1] >= q_end:
+            valid_q = (attention_mask[:, q_start:q_end] != 0).to(torch.float32)[:, None, :, None]
+            valid_k = (attention_mask[:, :q_end] != 0).to(torch.float32)[:, None, None, :]
+            probs_masked = probs * valid_q * valid_k
+        else:
+            probs_masked = probs
+
+        key_received_q[:, :, :q_end] += probs_masked.sum(dim=-2)
+
+        if q_end > ent_q_min:
+            rel_start = max(0, ent_q_min - q_start)
+            p_sub = probs[:, :, rel_start:, :].clamp(min=eps, max=1.0 - eps)
+            p_sub = p_sub / p_sub.sum(dim=-1, keepdim=True).clamp(min=eps)
+            tok_ent = -(p_sub * p_sub.log()).sum(dim=-1)
+            tok_ent = torch.nan_to_num(tok_ent, nan=0.0, posinf=0.0, neginf=0.0)
+            ent_sum += tok_ent.sum(dim=-1)
+            ent_count += int(tok_ent.shape[-1])
+
+    valid_ent = ent_sum / float(max(1, ent_count))
+    kv_ent = valid_ent.view(bsz, num_kv_heads, q_per_kv).mean(dim=-1).mean(dim=0)
+    kv_ent = torch.nan_to_num(kv_ent, nan=0.0, posinf=0.0, neginf=0.0)
+
+    idx = torch.arange(seq_len, device=device, dtype=torch.float32)
+    exposure = (float(seq_len) - idx).clamp(min=1.0).view(1, 1, seq_len)
+    ref_cum = key_received_q.view(bsz, num_kv_heads, q_per_kv, seq_len).mean(dim=2)
+    ref_norm = (key_received_q / exposure).view(bsz, num_kv_heads, q_per_kv, seq_len).mean(dim=2)
+
+    kv_copy: Optional[torch.Tensor] = None
+    kv_dist: Optional[torch.Tensor] = None
+    if needle_indices:
+        tail_len = min(4, seq_len)
+        q_tail = q_f[:, :, -tail_len:, :]
+        scores_tail = torch.matmul(q_tail, k_rep.transpose(-1, -2)) * scale
+        q_t_idx = torch.arange(seq_len - tail_len, seq_len, device=device).unsqueeze(1)
+        k_t_idx = torch.arange(0, seq_len, device=device).unsqueeze(0)
+        scores_tail = scores_tail.masked_fill((k_t_idx > q_t_idx).unsqueeze(0).unsqueeze(0), float("-inf"))
+        if attention_mask is not None and attention_mask.shape[-1] == seq_len:
+            scores_tail = scores_tail.masked_fill(
+                (attention_mask == 0).unsqueeze(1).unsqueeze(2), float("-inf")
+            )
+        probs_tail = torch.softmax(scores_tail, dim=-1)
+        idx_tensor = torch.tensor(list(needle_indices), device=device, dtype=torch.long)
+        copy_attn = probs_tail.index_select(dim=-1, index=idx_tensor).sum(dim=-1).amax(dim=-1)
+        kv_copy = copy_attn.view(bsz, num_kv_heads, q_per_kv).amax(dim=-1).mean(dim=0)
+        if distractor_indices:
+            d_tensor = torch.tensor(list(distractor_indices), device=device, dtype=torch.long)
+            dist_attn = probs_tail.index_select(dim=-1, index=d_tensor).sum(dim=-1).amax(dim=-1)
+            kv_dist = dist_attn.view(bsz, num_kv_heads, q_per_kv).amax(dim=-1).mean(dim=0)
+
+    return {
+        "kv_ent": kv_ent,
+        "ref_norm": ref_norm,
+        "ref_cum": ref_cum,
+        "kv_copy": kv_copy,
+        "kv_dist": kv_dist,
+    }
+
+
 def calibrate_model(
     model: nn.Module,
     tokenizer: Any,
@@ -1735,15 +1948,6 @@ def calibrate_model(
 
     try:
         model.eval()
-        if orig_attn_impl in ("sdpa", "flash_attention_2"):
-            if hasattr(model, "set_attn_implementation"):
-                try:
-                    model.set_attn_implementation("eager")
-                except Exception:
-                    model.config._attn_implementation = "eager"
-            else:
-                model.config._attn_implementation = "eager"
-
         for l_idx in range(num_layers):
             attn_mod = getattr(layers_module[l_idx], "self_attn", None) or getattr(
                 layers_module[l_idx], "attn"
@@ -1816,16 +2020,9 @@ def calibrate_model(
                 outputs = model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
-                    output_attentions=True,
-                    use_cache=True,
+                    output_attentions=False,
+                    use_cache=False,
                 )
-
-                attentions = getattr(outputs, "attentions", None)
-                if attentions is None or len(attentions) != num_layers or attentions[0] is None:
-                    raise RuntimeError(
-                        "Model forward pass with output_attentions=True did not return attention weights. "
-                        "Ensure the model is loaded with attn_implementation='eager' for calibration."
-                    )
 
                 seq_len = int(input_ids.shape[-1])
                 cos, sin = _compute_rope_cos_sin(
@@ -1862,88 +2059,41 @@ def calibrate_model(
 
                     # Apply consistent RoPE to Q and K so U_Q and K share the exact post-RoPE inner-product frame
                     q_rope, k_rope = _apply_rotary_pos_emb(q_pre, k_pre, cos, sin)
-                    attn_t = attentions[l_idx].detach()  # [1, num_q_heads, seq_len, seq_len]
+                    stats = _compute_streaming_layer_attention_stats(
+                        q_rope=q_rope,
+                        k_rope=k_rope,
+                        num_kv_heads=num_kv_heads,
+                        q_per_kv=q_per_kv,
+                        attention_mask=attention_mask,
+                        needle_indices=needle_indices if is_needle_prompt else None,
+                        distractor_indices=distractor_indices if is_needle_prompt else None,
+                    )
 
                     if split_tag in ("calib", "needle"):
                         calib_Q[l_idx].append(q_rope)
                         calib_K[l_idx].append(k_rope)
                         calib_K_pre[l_idx].append(k_pre)
                         calib_V[l_idx].append(v_t)
-
-                        # Compute Shannon attention entropy H_h per KV head on calibration prompts
-                        # Robust numerical stability: clamp to [eps, 1-eps] to avoid log(0) and log(1)
-                        eps = 1e-7
-                        attn_fp32 = attn_t.to(torch.float32).clamp(min=eps, max=1.0 - eps)
-                        # Renormalize to ensure valid probability distribution
-                        attn_fp32 = attn_fp32 / attn_fp32.sum(dim=-1, keepdim=True).clamp(min=eps)
-                        token_ent = -(attn_fp32 * attn_fp32.log()).sum(dim=-1)
-                        # Replace any non-finite with 0
-                        token_ent = torch.nan_to_num(token_ent, nan=0.0, posinf=0.0, neginf=0.0)
-                        valid_ent = (
-                            token_ent[:, :, 2:].mean(dim=-1)
-                            if token_ent.shape[-1] > 2
-                            else token_ent.mean(dim=-1)
-                        )
-                        kv_ent = valid_ent.view(1, num_kv_heads, q_per_kv).mean(dim=-1).squeeze(0)
-                        # Final safety check
-                        kv_ent = torch.nan_to_num(kv_ent, nan=0.0, posinf=0.0, neginf=0.0)
-                        entropy_accum[l_idx] += kv_ent
+                        entropy_accum[l_idx] += stats["kv_ent"]
                     else:
-                        # Held-out split: immediately reduce 4D attention to 3D per-key reference and discard 4D tensor
-                        ref_norm = reduce_attention_to_kv_heads(
-                            attn_t,
-                            num_kv_heads=num_kv_heads,
-                            q_per_kv=q_per_kv,
-                            attention_mask=attention_mask,
-                            normalize_by_exposure=True,
-                        )
-                        ref_cum = reduce_attention_to_kv_heads(
-                            attn_t,
-                            num_kv_heads=num_kv_heads,
-                            q_per_kv=q_per_kv,
-                            attention_mask=attention_mask,
-                            normalize_by_exposure=False,
-                        )
                         heldout_K[l_idx].append(k_rope)
                         heldout_V[l_idx].append(v_t)
-                        heldout_ref_norm[l_idx].append(ref_norm)
-                        heldout_ref_cum[l_idx].append(ref_cum)
+                        heldout_ref_norm[l_idx].append(stats["ref_norm"])
+                        heldout_ref_cum[l_idx].append(stats["ref_cum"])
 
-                    # Accumulate Needle copy attention vs distractor attention strictly split by calib vs heldout
-                    if is_needle_prompt and needle_indices:
-                        attn_fp32 = attn_t.to(torch.float32)
-                        idx_tensor = torch.tensor(needle_indices, device=device, dtype=torch.long)
-                        tail_len = min(4, attn_fp32.shape[-2])
-                        copy_attn = (
-                            attn_fp32[:, :, -tail_len:, :]
-                            .index_select(dim=-1, index=idx_tensor)
-                            .sum(dim=-1)
-                            .amax(dim=-1)
-                        )
-                        kv_copy = copy_attn.view(1, num_kv_heads, q_per_kv).amax(dim=-1).squeeze(0)
+                    if is_needle_prompt and needle_indices and stats["kv_copy"] is not None:
                         if split_tag in ("calib", "needle"):
-                            retrieval_accum[l_idx] += kv_copy
+                            retrieval_accum[l_idx] += stats["kv_copy"]
                         else:
-                            heldout_retrieval_accum[l_idx] += kv_copy
+                            heldout_retrieval_accum[l_idx] += stats["kv_copy"]
 
-                        if distractor_indices:
-                            d_tensor = torch.tensor(
-                                distractor_indices, device=device, dtype=torch.long
-                            )
-                            dist_attn = (
-                                attn_fp32[:, :, -tail_len:, :]
-                                .index_select(dim=-1, index=d_tensor)
-                                .sum(dim=-1)
-                                .amax(dim=-1)
-                            )
-                            kv_dist = dist_attn.view(1, num_kv_heads, q_per_kv).amax(dim=-1).squeeze(0)
+                        if distractor_indices and stats["kv_dist"] is not None:
                             if split_tag in ("calib", "needle"):
-                                distractor_accum[l_idx] += kv_dist
+                                distractor_accum[l_idx] += stats["kv_dist"]
                             else:
-                                heldout_distractor_accum[l_idx] += kv_dist
+                                heldout_distractor_accum[l_idx] += stats["kv_dist"]
 
-                # Explicitly drop 4D attention tuple reference at end of prompt iteration
-                del attentions, outputs
+                del outputs
     finally:
         for h in hook_handles:
             h.remove()
@@ -2009,10 +2159,17 @@ def calibrate_model(
             xtx = torch.matmul(q_grouped.transpose(-1, -2), q_grouped).cpu()
             xtx = xtx + 1e-1 * torch.eye(head_dim, device="cpu", dtype=xtx.dtype)
             _eigvals, eigvecs = torch.linalg.eigh(xtx)
-            u_q_layer = eigvecs[:, :, -r_subspace:].contiguous().to(q_grouped.device)
+            # Flip so column 0 is the principal eigenvector (largest eigenvalue)
+            u_q_layer = eigvecs[:, :, -r_subspace:].flip(-1).contiguous().to(q_grouped.device)
         except RuntimeError:
             _, _, vh = torch.linalg.svd(q_grouped.cpu(), full_matrices=False)
             u_q_layer = vh[:, :r_subspace, :].transpose(-1, -2).contiguous().to(q_grouped.device)
+
+        # Sign-align every basis column with the mean query vector so mean(Q) @ u_q_layer >= 0
+        q_mean = q_grouped.mean(dim=1, keepdim=True)  # [num_kv_heads, 1, head_dim]
+        proj_sign = torch.matmul(q_mean, u_q_layer)  # [num_kv_heads, 1, r_subspace]
+        sign_flip = torch.where(proj_sign < 0, -torch.ones_like(proj_sign), torch.ones_like(proj_sign))
+        u_q_layer = u_q_layer * sign_flip
         U_Q[l_idx] = u_q_layer.to(model_dtype)
 
         # 3. Evaluate Write-Time Probe on Held-Out Evaluation Prompts

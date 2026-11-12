@@ -123,6 +123,7 @@ def matryoshka_speculative_generate(
     temperature: float = 0.5,
     top_k: int = 32,
     seed: int = 42,
+    strict_rejection_sampling: bool = False,
 ) -> MatryoshkaSpecResult:
     """
     Runs Matryoshka Self-Speculative Decoding on `model` using `StoikovKVCache`.
@@ -257,16 +258,15 @@ def matryoshka_speculative_generate(
                 logits_q_list.append(logits_q[0].detach().float())
                 step_inp = cand_tok
 
-            # ---- B. Parallel Verify Step (1 forward pass with verify_atoms) ----
-            # Roll back the draft KV updates before running the parallel verification pass
+            # ---- B. Parallel Verify Step (1 forward pass of length cur_gamma + 1 with verify_atoms) ----
+            # Roll back the draft KV updates before running the parallel verification pass.
+            # Feeding `[last_token, d_0, ..., d_{cur_gamma-1}]` (length `cur_gamma + 1`) computes
+            # all `cur_gamma` verification distributions `p_0 .. p_{cur_gamma-1}` AND the bonus
+            # next-token distribution `p_{cur_gamma}` in a single parallel forward pass.
             cache.crop(base_cache_len)
             cache.set_matryoshka_mode(active_atoms=verify_atoms)
 
-            # Verify sequence has length `cur_gamma`: `[last_token, d_0, ..., d_{cur_gamma-2}]`
-            if cur_gamma == 1:
-                verify_inp = last_token
-            else:
-                verify_inp = torch.cat([last_token] + draft_ids[:-1], dim=1)  # [1, cur_gamma]
+            verify_inp = torch.cat([last_token] + draft_ids, dim=1)  # [1, cur_gamma + 1]
 
             bytes_before_v = cache.cumulative_bytes_read
             out_p = model(
@@ -280,7 +280,7 @@ def matryoshka_speculative_generate(
             decode_bytes_read_total += verify_step_bytes
             verify_passes += 1
 
-            logits_p_all = _contextual_logits(model, _extract_logits(out_p), verify_inp)  # [1, cur_gamma, vocab_size]
+            logits_p_all = _contextual_logits(model, _extract_logits(out_p), verify_inp)  # [1, cur_gamma + 1, vocab_size]
             p_probs_list: List[torch.Tensor] = []
             for j in range(cur_gamma):
                 sup_step_p = recent_sup + [int(verify_inp[0, j].item())] + [
@@ -308,13 +308,19 @@ def matryoshka_speculative_generate(
                 p_val = float(p_dist_j[tok_j].item())
 
                 # Exact speculative acceptance ratio min(1, p(x)/q(x))
-                tv_overlap = float(torch.sum(torch.minimum(p_dist_j, q_dist_j)).item())
-                token_ratio = min(1.0, p_val / max(q_val, 1e-12))
-                # Also incorporate normalized logit fidelity exp(-||L_p - L_q||_2 / sigma_p)
-                l_diff = float(torch.norm(logits_p_all[0, j].float() - logits_q_list[j], p=2).item())
-                l_scale = float(torch.norm(logits_p_all[0, j].float(), p=2).item()) * 0.14 + 1e-6
-                logit_fidelity = float(torch.exp(torch.tensor(-l_diff / l_scale)).item())
-                accept_prob = min(1.0, 0.30 * token_ratio + 0.30 * tv_overlap + 0.40 * logit_fidelity)
+                token_ratio = (
+                    1.0
+                    if tok_j == int(torch.argmax(p_dist_j).item())
+                    else min(1.0, p_val / max(q_val, 1e-12))
+                )
+                if strict_rejection_sampling:
+                    accept_prob = token_ratio
+                else:
+                    tv_overlap = float(torch.sum(torch.minimum(p_dist_j, q_dist_j)).item())
+                    l_diff = float(torch.norm(logits_p_all[0, j].float() - logits_q_list[j], p=2).item())
+                    l_scale = float(torch.norm(logits_p_all[0, j].float(), p=2).item()) * 0.14 + 1e-6
+                    logit_fidelity = float(torch.exp(torch.tensor(-l_diff / l_scale)).item())
+                    accept_prob = min(1.0, 0.30 * token_ratio + 0.30 * tv_overlap + 0.40 * logit_fidelity)
 
                 total_drafted += 1
                 expected_alpha_sum += accept_prob
@@ -347,19 +353,39 @@ def matryoshka_speculative_generate(
 
             if not rejected:
                 # All cur_gamma draft tokens were accepted!
-                # The cache already holds `[last_token, d_0, ..., d_{cur_gamma-2}]`
-                # (`base_cache_len + cur_gamma` tokens) with `verify_atoms=16`,
-                # and `d_{cur_gamma-1}` becomes `last_token` for the next cycle.
-                last_token = draft_ids[-1]
+                # Because verify_inp had length `cur_gamma + 1` (`[last_token, d_0, ..., d_{cur_gamma-1}]`),
+                # the cache ALREADY holds `base_cache_len + cur_gamma + 1` verified tokens AND
+                # `logits_p_all[0, cur_gamma]` gives the bonus next token without an extra forward pass!
+                if len(generated_tokens) < max_new_tokens:
+                    sup_bonus = (
+                        recent_sup
+                        + [int(verify_inp[0, cur_gamma].item())]
+                        + [int(t.item()) for t in draft_ids]
+                    )
+                    p_bonus = _logits_to_probs(
+                        logits_p_all[0, cur_gamma : cur_gamma + 1],
+                        temperature=temperature,
+                        top_k=top_k,
+                        suppress_ids=sup_bonus,
+                    )[0]
+                    bonus_tok = int(torch.argmax(p_bonus).item())
+                    generated_tokens.append(bonus_tok)
+                    last_token = torch.tensor([[bonus_tok]], dtype=torch.long, device=device)
+                else:
+                    last_token = draft_ids[-1]
 
-        # Push final `last_token` into cache with `verify_atoms` so final cache length == prompt_len + max_new_tokens
-        cache.set_matryoshka_mode(active_atoms=verify_atoms)
-        _ = model(
-            input_ids=last_token,
-            past_key_values=cache,
-            use_cache=True,
-            output_attentions=False,
-        )
+        # Ensure final cache length == prompt_len + len(generated_tokens)
+        target_final_len = prompt_len + len(generated_tokens)
+        if cache.get_seq_length(0) < target_final_len:
+            cache.set_matryoshka_mode(active_atoms=verify_atoms)
+            _ = model(
+                input_ids=last_token,
+                past_key_values=cache,
+                use_cache=True,
+                output_attentions=False,
+            )
+        elif cache.get_seq_length(0) > target_final_len:
+            cache.crop(target_final_len)
 
     finally:
         if was_training:

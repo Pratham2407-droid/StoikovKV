@@ -31,6 +31,10 @@ from .matryoshka_spec import (
     MatryoshkaSpecResult,
     matryoshka_speculative_generate,
 )
+from .server import (
+    StoikovInferenceEngine,
+    create_http_server,
+)
 
 __all__ = [
     "ROLE_RETRIEVAL_FP16",
@@ -56,4 +60,6 @@ __all__ = [
     "load_or_create_artifacts",
     "MatryoshkaSpecResult",
     "matryoshka_speculative_generate",
+    "StoikovInferenceEngine",
+    "create_http_server",
 ]
