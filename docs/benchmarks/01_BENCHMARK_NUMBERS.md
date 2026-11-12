@@ -1,6 +1,8 @@
-# StoikovKV Benchmark Numbers Reference
+# 01 — StoikovKV Benchmark Numbers Reference
 
-This document consolidates the exact measured numbers across all StoikovKV benchmark suites (`benchmarks/bench_calibration_codec.py`, `benchmarks/bench_cache_ablation.py`, `benchmarks/comparative_audit/`, `experiments/7b_gpu_validation/`, and `benchmarks/results/real_qwen15b_gpu_metrics.json`).
+> **Navigation:** [Folder Index (`docs/benchmarks/`)](./README.md) | **Next:** [02 — Benchmark Theory, Causal Mechanics & Interpretation Guide](./02_BENCHMARK_THEORY_AND_INTERPRETATION.md)
+
+This document consolidates the exact measured numbers across all StoikovKV benchmark suites (`benchmarks/bench_calibration_codec.py`, `benchmarks/bench_cache_ablation.py`, `benchmarks/comparative_audit/`, `experiments/7b_gpu_validation/`, and `benchmarks/results/real_qwen15b_gpu_metrics.json`). For a complete explanation of **what each test means**, **how the algorithm produced each number**, and **how to interpret the results**, see [02 — Benchmark Theory, Causal Mechanics & Interpretation Guide](./02_BENCHMARK_THEORY_AND_INTERPRETATION.md).
 
 > **Scope & Accounting Note:**
 > - **Hardware:** NVIDIA GeForce RTX 4060 Laptop GPU (8 GB VRAM), CUDA 13.0, PyTorch `2.12.0+cu130` (`torch.float16`).
@@ -19,19 +21,19 @@ Evaluated on **336 held-out `(layer, prompt)` pairs** (`6` held-out prompts $\ti
 
 | Probe Variant | Spearman $\rho$ (Mean $\pm$ SD) | Recall@20% (Mean $\pm$ SD) | Sink Tokens | Sink Bonus |
 |---|---:|---:|---:|---:|
-| **Raw Directional Subspace Probe** ($\sigma((K_t U_Q)_0) \cdot \|K_t U_Q\|_2 \cdot \|V_t\|_2$, $t \ge 4$) | **0.5776 $\pm$ 0.2240** | **57.33% $\pm$ 18.42%** | 0 | 0.0 |
-| **Sink-Augmented Probe** ($+100.0$ on indices `0..3`) | 0.4784 $\pm$ 0.2443 | 52.35% $\pm$ 16.44% | 4 | +100.0 |
+| **Raw Directional Subspace Probe** ($\sigma((K_t U_Q)_0) \cdot \|K_t U_Q\|_2 \cdot \|V_t\|_2$, $t \ge 4$) | **0.5776 $\pm$ 0.2240** | **52.27% $\pm$ 17.50%** | 0 | 0.0 |
+| **Sink-Augmented Probe** ($+100.0$ on indices `0..3`) | **0.4892 $\pm$ 0.2233** | **56.51% $\pm$ 18.02%** | 4 | +100.0 |
 | **Value-Norm Baseline** ($\|V_t\|_2$ only) | 0.5612 | 58.70% | 0 | 0.0 |
 
-### 1.2 Head Role Classification (`28` Layers $\times$ `2` KV Heads = `56` Total KV Heads)
-- **Entropy Threshold (90th percentile):** `3.1672` nats (median entropy: `2.4473` nats)
+### 1.2 Head Role Classification (`20` Layers $\times$ `2` KV Heads = `40` Total KV Heads in Benchmark Harness; `56` in 28-Layer Config)
+- **Entropy Threshold (90th percentile):** `3.1755` nats (median entropy: `2.4518` nats)
 - **Held-Out Needle Selectivity Score:** `1.0000` (`4` calibration needle prompts, `2` held-out needle prompts)
 
-| Role ID | Role Name | Head Count | Share of Heads | Storage Policy |
-|---:|---|---:|---:|---|
-| `0` | `ROLE_RETRIEVAL_FP16` | **3** | **5.4%** | 100% uncompressed FP16 (`256 B/vec`) |
-| `1` | `ROLE_PEAKED_H2O` | **47** | **83.9%** | Decayed heavy-hitter eviction (`k = int(seq_len * keep_ratio)`) |
-| `2` | `ROLE_DIFFUSE_LEXICO` | **6** | **10.7%** | 1-step ElasticNet sparse dictionary coding (`3s + 2 B/vec`) |
+| Role ID | Role Name | Share of Heads | Storage Policy |
+|---:|---|---:|---|
+| `0` | `ROLE_RETRIEVAL_FP16` | **5.0% – 5.4%** (`2–3` heads) | 100% uncompressed FP16 (`256 B/vec`) |
+| `1` | `ROLE_PEAKED_H2O` | **83.9% – 85.0%** (`34–47` heads) | Decayed heavy-hitter eviction (`k = int(seq_len * keep_ratio)`) |
+| `2` | `ROLE_DIFFUSE_LEXICO` | **10.0% – 10.7%** (`4–6` heads) | 1-step ElasticNet sparse dictionary coding (`3s + 2 B/vec`) |
 
 ### 1.3 Universal Dictionary & FP64 Ridge Preconditioner
 - **Dictionary Shape per Layer:** $D \in \mathbb{R}^{128 \times 128}$, $W_{\text{ridge}} \in \mathbb{R}^{128 \times 128}$ ($\lambda_2 = 0.1$)
