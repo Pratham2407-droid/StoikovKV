@@ -394,7 +394,32 @@ def create_mock_artifacts(
         head_roles_flat[rem_idx[peaked_mask]] = ROLE_PEAKED_H2O
         head_roles_flat[rem_idx[~peaked_mask]] = ROLE_DIFFUSE_LEXICO
 
+    # Co-locate ROLE_DIFFUSE_LEXICO with ROLE_RETRIEVAL_FP16 layers so every
+    # ROLE_PEAKED_H2O layer is layer-pure (`all_h2o == True`) and never needs dummy padding.
     head_roles = head_roles_flat.view(num_layers, num_kv_heads)
+    n_lex_target = int((head_roles == ROLE_DIFFUSE_LEXICO).sum().item())
+    ret_layers = [
+        l_idx for l_idx in range(num_layers) if bool((head_roles[l_idx] == ROLE_RETRIEVAL_FP16).any().item())
+    ]
+    non_ret_layers = [l_idx for l_idx in range(num_layers) if l_idx not in ret_layers]
+    for l_idx in range(num_layers):
+        for h_idx in range(num_kv_heads):
+            if head_roles[l_idx, h_idx] != ROLE_RETRIEVAL_FP16:
+                head_roles[l_idx, h_idx] = ROLE_PEAKED_H2O
+    lex_assigned = 0
+    for l_idx in ret_layers:
+        for h_idx in range(num_kv_heads):
+            if head_roles[l_idx, h_idx] != ROLE_RETRIEVAL_FP16:
+                head_roles[l_idx, h_idx] = ROLE_DIFFUSE_LEXICO
+                lex_assigned += 1
+    if lex_assigned < n_lex_target and non_ret_layers:
+        layer_ent = [(float(head_entropy[l_idx].mean().item()), l_idx) for l_idx in non_ret_layers]
+        layer_ent.sort(key=lambda x: x[0], reverse=True)
+        for _, l_idx in layer_ent:
+            if lex_assigned >= n_lex_target:
+                break
+            head_roles[l_idx, :] = ROLE_DIFFUSE_LEXICO
+            lex_assigned += num_kv_heads
 
     artifacts = {
         "U_Q": U_Q,
@@ -590,6 +615,57 @@ class _HeadTierState:
 # ============================================================================
 
 
+_HF_SDPA_PATCHED: bool = False
+
+
+def _ensure_hf_sdpa_compact_mask_support() -> bool:
+    """
+    Wraps HuggingFace's `sdpa_attention_forward` in `ALL_ATTENTION_FUNCTIONS["sdpa"]`
+    so compact `ROLE_PEAKED_H2O` KV tensors (`kv_len = k_kept + win_len < total_seq_len`)
+    work seamlessly for both single-token decoding (`q_len == 1`) and multi-token
+    parallel verification (`1 < q_len <= win_len`):
+    1. If a 4D causal `attention_mask` has last dim `total_seq_len > kv_len`, slices it to
+       `attention_mask[..., -kv_len:]` (exact lower-right causal alignment).
+    2. If `attention_mask is None` and `1 < q_len < kv_len`, provides an explicit lower-right
+       causal boolean mask so HF `sdpa_attention_forward` does not truncate `key[:, :, :q_len]`.
+    """
+    global _HF_SDPA_PATCHED
+    if _HF_SDPA_PATCHED:
+        return True
+    try:
+        import transformers.integrations.sdpa_attention as hf_sdpa
+        from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
+
+        orig_sdpa = hf_sdpa.sdpa_attention_forward
+
+        def _stoikov_sdpa_attention_forward(
+            module: Any,
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            attention_mask: Optional[torch.Tensor],
+            *args: Any,
+            **kwargs: Any,
+        ) -> Any:
+            q_len = int(query.shape[-2])
+            kv_len = int(key.shape[-2])
+            if isinstance(attention_mask, torch.Tensor) and attention_mask.dim() == 4:
+                if attention_mask.shape[-1] > kv_len:
+                    attention_mask = attention_mask[..., -kv_len:]
+            elif attention_mask is None and q_len > 1 and kv_len > q_len:
+                q_idx = torch.arange(q_len, device=query.device).unsqueeze(1)
+                k_idx = torch.arange(kv_len, device=query.device).unsqueeze(0)
+                attention_mask = (k_idx <= ((kv_len - q_len) + q_idx)).unsqueeze(0).unsqueeze(0)
+            return orig_sdpa(module, query, key, value, attention_mask, *args, **kwargs)
+
+        hf_sdpa.sdpa_attention_forward = _stoikov_sdpa_attention_forward
+        ALL_ATTENTION_FUNCTIONS["sdpa"] = _stoikov_sdpa_attention_forward
+        _HF_SDPA_PATCHED = True
+        return True
+    except Exception:
+        return False
+
+
 class StoikovKVCache(DynamicCache):
     """
     FlashAttention/SDPA-Compatible Hybrid KV Cache (`StoikovKVCache(DynamicCache)`).
@@ -630,25 +706,25 @@ class StoikovKVCache(DynamicCache):
         enable_hmm_decay: bool = True,
         max_rollback_window: int = 32,
         h2o_context_window: int = 0,
+        cache_lexico_reconstructions: bool = False,
     ) -> None:
-        # Initialize HF DynamicCache with model config for compatibility
-        if model is not None and hasattr(model, 'config'):
-            from transformers import PreTrainedConfig
-            if isinstance(model.config, PreTrainedConfig):
-                super().__init__(config=model.config)
-            else:
-                from transformers import AutoConfig
-                super().__init__(config=AutoConfig.from_pretrained("Qwen/Qwen2.5-1.5B-Instruct"))
-        else:
-            super().__init__(config=None)
-
-        # Ensure our local key_cache and value_cache exist (HF may not initialize them)
-        if not hasattr(self, 'key_cache'):
-            self.key_cache: List[torch.Tensor] = []
-        if not hasattr(self, 'value_cache'):
-            self.value_cache: List[torch.Tensor] = []
-        if not hasattr(self, '_seen_tokens'):
-            self._seen_tokens: int = 0
+        # Initialize HF DynamicCache with config=None so DynamicCache does not allocate
+        # duplicate uncompressed DynamicLayer objects across all layers.
+        super().__init__(config=None)
+        self.layers = []
+        self.key_cache: List[torch.Tensor] = []
+        self.value_cache: List[torch.Tensor] = []
+        self._seen_tokens: int = 0
+        self.cache_lexico_reconstructions: bool = bool(cache_lexico_reconstructions)
+        self._is_hf_model: bool = (
+            model is not None and model.__class__.__name__ != "FallbackQwen2ForCausalLM"
+        )
+        if self._is_hf_model:
+            _ensure_hf_sdpa_compact_mask_support()
+        self._hf_eager_mode: bool = (
+            self._is_hf_model
+            and getattr(getattr(model, "config", None), "_attn_implementation", "sdpa") == "eager"
+        )
 
         if artifacts is None:
             if model is None:
@@ -687,7 +763,7 @@ class StoikovKVCache(DynamicCache):
         self.lambda1: float = float(lambda1)
         self.sink_tokens: int = max(0, int(sink_tokens))
         self.sink_bonus: float = float(sink_bonus)
-        self.max_rollback_window: int = max(8, int(max_rollback_window))
+        self.max_rollback_window: int = max(0, int(max_rollback_window))
         # Retain a small neighborhood around selected heavy hitters.  This
         # keeps a salient token's immediate syntax/context from being split
         # across an eviction boundary while preserving the same H2O budget.
@@ -745,6 +821,7 @@ class StoikovKVCache(DynamicCache):
         # Byte telemetry
         self.fp16_bytes: int = 0
         self.compressed_bytes: int = 0
+        self.physical_resident_bytes: int = 0
         self.bytes_read_last_step: int = 0
         self.cumulative_bytes_read: int = 0
         self._layer_bytes_read: List[int] = [0 for _ in range(self.num_layers)]
@@ -791,6 +868,115 @@ class StoikovKVCache(DynamicCache):
         seq_len = int(self._layer_seq_len[idx]) if self.num_layers > 0 else 0
         return (seq_len + int(query_length), 0)
 
+    def get_query_offset(self, layer_idx: int = 0) -> int:
+        return 0
+
+    def get_max_cache_shape(self, layer_idx: int = 0) -> int:
+        return -1
+
+    def get_max_length(self) -> Optional[int]:
+        return None
+
+    def get_usable_length(self, new_seq_length: int, layer_idx: Optional[int] = 0) -> int:
+        return self.get_seq_length(layer_idx)
+
+    @property
+    def is_initialized(self) -> bool:
+        return self.get_seq_length(0) > 0
+
+    @property
+    def is_compileable(self) -> bool:
+        return False
+
+    @property
+    def is_sliding(self) -> List[bool]:
+        return [False] * self.num_layers
+
+    @property
+    def is_linear(self) -> List[bool]:
+        return [False] * self.num_layers
+
+    @property
+    def is_croppable(self) -> bool:
+        return True
+
+    @property
+    def batch_size(self) -> Optional[int]:
+        if self._local_k and self._local_k[0] is not None:
+            return int(self._local_k[0].shape[0])
+        return None
+
+    def __len__(self) -> int:
+        return self.num_layers if self.is_initialized else 0
+
+    def __getitem__(self, layer_idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        if layer_idx < 0 or layer_idx >= self.num_layers or self._local_k[layer_idx] is None:
+            raise KeyError(f"Cache at layer {layer_idx} is empty or out of bounds.")
+        lk = self._local_k[layer_idx]
+        k_out, v_out, _ = self._materialize_layer_kv(
+            layer_idx=layer_idx, dtype=lk.dtype, device=lk.device, q_len=1
+        )
+        return k_out, v_out
+
+    def __iter__(self):
+        for l_idx in range(len(self)):
+            yield self[l_idx]
+
+    def reset(self) -> None:
+        self.crop(0)
+
+    @torch.no_grad()
+    def _apply_batch_index(self, idx: torch.Tensor) -> None:
+        for l_idx in range(self.num_layers):
+            if self._local_k[l_idx] is not None:
+                dev = self._local_k[l_idx].device
+                b_idx = idx.to(dev)
+                self._local_k[l_idx] = self._local_k[l_idx].index_select(0, b_idx)
+                self._local_v[l_idx] = self._local_v[l_idx].index_select(0, b_idx)
+                self._local_scores[l_idx] = self._local_scores[l_idx].index_select(0, b_idx)
+            if self._flushed_ring_k[l_idx] is not None:
+                dev = self._flushed_ring_k[l_idx].device
+                b_idx = idx.to(dev)
+                self._flushed_ring_k[l_idx] = self._flushed_ring_k[l_idx].index_select(0, b_idx)
+                self._flushed_ring_v[l_idx] = self._flushed_ring_v[l_idx].index_select(0, b_idx)
+                self._flushed_ring_scores[l_idx] = self._flushed_ring_scores[l_idx].index_select(0, b_idx)
+            for h_idx in range(self.num_kv_heads):
+                st = self._tiers[l_idx][h_idx]
+                if st.fp16_k is not None:
+                    b_idx = idx.to(st.fp16_k.device)
+                    st.fp16_k = st.fp16_k.index_select(0, b_idx)
+                    st.fp16_v = st.fp16_v.index_select(0, b_idx)
+                if st.h2o_k is not None:
+                    b_idx = idx.to(st.h2o_k.device)
+                    st.h2o_k = st.h2o_k.index_select(0, b_idx)
+                    st.h2o_v = st.h2o_v.index_select(0, b_idx)
+                    st.h2o_indices = st.h2o_indices.index_select(0, b_idx)
+                    st.h2o_scores = st.h2o_scores.index_select(0, b_idx)
+                if st.lex_k_idx is not None and st.lex_k_val is not None:
+                    b_idx = idx.to(st.lex_k_idx.device)
+                    st.lex_k_idx = st.lex_k_idx.index_select(0, b_idx)
+                    st.lex_v_idx = st.lex_v_idx.index_select(0, b_idx)
+                    raw_k = torch.Tensor._make_subclass(torch.Tensor, st.lex_k_val).index_select(0, b_idx)
+                    raw_v = torch.Tensor._make_subclass(torch.Tensor, st.lex_v_val).index_select(0, b_idx)
+                    st.lex_k_val = QuantizedInt8Values(raw_k, st.lex_k_val.scale.index_select(0, b_idx))
+                    st.lex_v_val = QuantizedInt8Values(raw_v, st.lex_v_val.scale.index_select(0, b_idx))
+                    st.lex_recon_k = None
+                    st.lex_recon_v = None
+                    st.lex_recon_atoms = -1
+
+    def reorder_cache(self, beam_idx: torch.LongTensor) -> None:
+        self._apply_batch_index(beam_idx)
+
+    def batch_select_indices(self, indices: torch.Tensor) -> None:
+        self._apply_batch_index(indices)
+
+    def batch_repeat_interleave(self, repeats: int) -> None:
+        bsz = self.batch_size
+        if bsz is None:
+            return
+        idx = torch.arange(bsz).repeat_interleave(int(repeats))
+        self._apply_batch_index(idx)
+
     @torch.no_grad()
     def _rope_rotate(self, x: torch.Tensor, positions: torch.Tensor, inverse: bool) -> torch.Tensor:
         """
@@ -832,9 +1018,16 @@ class StoikovKVCache(DynamicCache):
 
         # Project K onto U_Q: [B, H, T, D] @ [H, D, r] -> [B, H, T, r]
         proj = torch.einsum("bhtd,hdr->bhtr", k_f, u_q_l)
-        proj_norm = torch.linalg.vector_norm(proj, ord=2, dim=-1)  # [B, H, T]
         v_norm = torch.linalg.vector_norm(v_f, ord=2, dim=-1)  # [B, H, T]
-        scores = proj_norm * v_norm  # [B, H, T]
+        if self._is_hf_model:
+            dir_gate = F.softplus(proj[..., 0])
+            proj_norm = torch.linalg.vector_norm(F.relu(proj), ord=2, dim=-1)  # [B, H, T]
+            v_factor = torch.where(v_norm > 0, v_norm.clamp(min=1e-6).sqrt(), torch.zeros_like(v_norm))
+            scores = dir_gate * (1.0 + 0.25 * proj_norm) * v_factor  # [B, H, T]
+        else:
+            dir_gate = torch.sigmoid(proj[..., 0])
+            proj_norm = torch.linalg.vector_norm(proj, ord=2, dim=-1)  # [B, H, T]
+            scores = dir_gate * proj_norm * v_norm  # [B, H, T]
 
         # Apply sink gate (+100.0) for global token indices 0..3
         if self.sink_tokens > 0 and start_pos < self.sink_tokens:
@@ -902,26 +1095,27 @@ class StoikovKVCache(DynamicCache):
         overflow_scores = torch.nan_to_num(overflow_scores, nan=0.0, posinf=0.0, neginf=0.0)
 
         # Save last `max_rollback_window` flushed tokens in ring buffer for lossless `crop()`
-        if self._flushed_ring_k[layer_idx] is None:
-            self._flushed_ring_k[layer_idx] = overflow_k[:, :, -self.max_rollback_window :, :].clone()
-            self._flushed_ring_v[layer_idx] = overflow_v[:, :, -self.max_rollback_window :, :].clone()
-            self._flushed_ring_scores[layer_idx] = overflow_scores[:, :, -self.max_rollback_window :].clone()
-            self._flushed_ring_pos[layer_idx] = overflow_pos[-self.max_rollback_window :].clone()
-        else:
-            prev_pos = self._flushed_ring_pos[layer_idx]
-            keep_prev = prev_pos < overflow_pos[0]
-            self._flushed_ring_k[layer_idx] = torch.cat(
-                [self._flushed_ring_k[layer_idx][:, :, keep_prev, :], overflow_k], dim=-2
-            )[:, :, -self.max_rollback_window :, :]
-            self._flushed_ring_v[layer_idx] = torch.cat(
-                [self._flushed_ring_v[layer_idx][:, :, keep_prev, :], overflow_v], dim=-2
-            )[:, :, -self.max_rollback_window :, :]
-            self._flushed_ring_scores[layer_idx] = torch.cat(
-                [self._flushed_ring_scores[layer_idx][:, :, keep_prev], overflow_scores], dim=-1
-            )[:, :, -self.max_rollback_window :]
-            self._flushed_ring_pos[layer_idx] = torch.cat(
-                [prev_pos[keep_prev], overflow_pos], dim=0
-            )[-self.max_rollback_window :]
+        if self.max_rollback_window > 0:
+            if self._flushed_ring_k[layer_idx] is None:
+                self._flushed_ring_k[layer_idx] = overflow_k[:, :, -self.max_rollback_window :, :].clone()
+                self._flushed_ring_v[layer_idx] = overflow_v[:, :, -self.max_rollback_window :, :].clone()
+                self._flushed_ring_scores[layer_idx] = overflow_scores[:, :, -self.max_rollback_window :].clone()
+                self._flushed_ring_pos[layer_idx] = overflow_pos[-self.max_rollback_window :].clone()
+            else:
+                prev_pos = self._flushed_ring_pos[layer_idx]
+                keep_prev = prev_pos < overflow_pos[0]
+                self._flushed_ring_k[layer_idx] = torch.cat(
+                    [self._flushed_ring_k[layer_idx][:, :, keep_prev, :], overflow_k], dim=-2
+                )[:, :, -self.max_rollback_window :, :]
+                self._flushed_ring_v[layer_idx] = torch.cat(
+                    [self._flushed_ring_v[layer_idx][:, :, keep_prev, :], overflow_v], dim=-2
+                )[:, :, -self.max_rollback_window :, :]
+                self._flushed_ring_scores[layer_idx] = torch.cat(
+                    [self._flushed_ring_scores[layer_idx][:, :, keep_prev], overflow_scores], dim=-1
+                )[:, :, -self.max_rollback_window :]
+                self._flushed_ring_pos[layer_idx] = torch.cat(
+                    [prev_pos[keep_prev], overflow_pos], dim=0
+                )[-self.max_rollback_window :]
 
         # Compute positional decay weights inside overflow chunk if n_over > 1
         if n_over > 1:
@@ -999,10 +1193,10 @@ class StoikovKVCache(DynamicCache):
             elif st.role == ROLE_DIFFUSE_LEXICO:
                 k_h_code = self._rope_rotate(k_h, overflow_pos, inverse=True)
                 k_idx, k_val = self.codec.encode(
-                    k_h_code, layer_idx=layer_idx, s=s_budget, lambda1=self.lambda1
+                    k_h_code, layer_idx=layer_idx, s=s_budget, lambda1=self.lambda1, validate_finite=False
                 )
                 v_idx, v_val = self.codec.encode(
-                    v_h, layer_idx=layer_idx, s=s_budget, lambda1=self.lambda1
+                    v_h, layer_idx=layer_idx, s=s_budget, lambda1=self.lambda1, validate_finite=False
                 )
                 if st.lex_k_idx is None:
                     st.lex_k_idx = k_idx
@@ -1032,26 +1226,30 @@ class StoikovKVCache(DynamicCache):
                     new_v_sc = torch.cat([st.lex_v_val.scale, v_val.scale], dim=-2)
                     st.lex_v_val = QuantizedInt8Values(new_v_raw, new_v_sc)
 
-                # If active_atoms matches cached reconstruction, append incrementally
                 if (
-                    st.lex_recon_k is not None
+                    self.cache_lexico_reconstructions
+                    and st.lex_recon_k is not None
                     and st.lex_recon_atoms == self.active_atoms
                 ):
                     rk = self.codec.decode(
                         k_idx[..., : self.active_atoms],
                         k_val[..., : self.active_atoms],
                         layer_idx=layer_idx,
+                        check_bounds=False,
                     ).to(dtype=overflow_k.dtype)
                     rk = self._rope_rotate(rk, overflow_pos, inverse=False)
                     rv = self.codec.decode(
                         v_idx[..., : self.active_atoms],
                         v_val[..., : self.active_atoms],
                         layer_idx=layer_idx,
+                        check_bounds=False,
                     ).to(dtype=overflow_v.dtype)
                     st.lex_recon_k = torch.cat([st.lex_recon_k, rk], dim=-2)
                     st.lex_recon_v = torch.cat([st.lex_recon_v, rv], dim=-2)
                     st.lex_recon_len = int(st.lex_recon_k.shape[-2])
                 else:
+                    st.lex_recon_k = None
+                    st.lex_recon_v = None
                     st.lex_recon_atoms = -1
 
     @torch.no_grad()
@@ -1060,6 +1258,7 @@ class StoikovKVCache(DynamicCache):
         layer_idx: int,
         dtype: torch.dtype,
         device: torch.device,
+        q_len: int = 1,
     ) -> Tuple[torch.Tensor, torch.Tensor, int]:
         """
         Materializes the rectangular `[batch, num_kv_heads, kv_len, head_dim]` tensor for
@@ -1083,9 +1282,52 @@ class StoikovKVCache(DynamicCache):
         roles_l = self.head_roles[layer_idx]
         all_h2o = bool(torch.all(roles_l == ROLE_PEAKED_H2O).item())
 
-        # Always materialize a logical-length representation.  H2O's evicted
-        # positions are masked by anti-aligned keys below, which keeps the
-        # returned KV tensor aligned with Transformers' causal-mask contract.
+        # Fast compact path when all heads in this layer are ROLE_PEAKED_H2O and all
+        # incoming query positions lie inside the recent window (q_len <= win_len).
+        # Every kept heavy hitter precedes every query position, so SDPA / FlashAttention
+        # can attend directly to the compact [B, n_kv, k_kept + win_len, d_head] tensor
+        # without padding to hist_len, scattering, or injecting anti_k dummy slots.
+        if all_h2o and not self._hf_eager_mode and q_len <= win_len:
+            k_heads = []
+            v_heads = []
+            bytes_read = int(bsz * n_kv * win_len * 2 * d_head * 2)
+            kept_lens = [
+                int(self._tiers[layer_idx][h_idx].h2o_k.shape[-2])
+                if self._tiers[layer_idx][h_idx].h2o_k is not None
+                else 0
+                for h_idx in range(n_kv)
+            ]
+            max_kept = max(kept_lens) if kept_lens else 0
+            has_sink = (not self._is_hf_model) and (hist_len > max_kept)
+            for h_idx in range(n_kv):
+                st = self._tiers[layer_idx][h_idx]
+                k_kept = kept_lens[h_idx]
+                if k_kept > 0 and st.h2o_k is not None and st.h2o_v is not None:
+                    hk = st.h2o_k
+                    hv = st.h2o_v
+                    bytes_read += int(bsz * k_kept * 2 * d_head * 2)
+                else:
+                    hk = torch.empty((bsz, 0, d_head), dtype=dtype, device=device)
+                    hv = torch.empty((bsz, 0, d_head), dtype=dtype, device=device)
+                if hk.shape[-2] < max_kept:
+                    pad_n = max_kept - int(hk.shape[-2])
+                    anti_col = 0 if self._is_hf_model else -1
+                    anti_k = (-30.0 * self.U_Q[layer_idx, h_idx, :, anti_col]).to(dtype=dtype, device=device)
+                    hk = torch.cat([anti_k.view(1, 1, d_head).expand(bsz, pad_n, d_head), hk], dim=-2)
+                    hv = torch.cat([torch.zeros((bsz, pad_n, d_head), dtype=dtype, device=device), hv], dim=-2)
+                if has_sink:
+                    n_evicted = max(1, hist_len - k_kept)
+                    u0 = self.U_Q[layer_idx, h_idx, :, 0].to(dtype=dtype, device=device)
+                    k_sink = (4.05 * math.log(n_evicted) * u0).view(1, 1, d_head).expand(bsz, 1, d_head)
+                    v_sink = torch.zeros((bsz, 1, d_head), dtype=dtype, device=device)
+                    hk = torch.cat([k_sink, hk], dim=-2)
+                    hv = torch.cat([v_sink, hv], dim=-2)
+                k_heads.append(torch.cat([hk, local_k[:, h_idx]], dim=-2))
+                v_heads.append(torch.cat([hv, local_v[:, h_idx]], dim=-2))
+            k_out = torch.stack(k_heads, dim=1)
+            v_out = torch.stack(v_heads, dim=1)
+            return k_out, v_out, bytes_read
+
         k_heads = []
         v_heads = []
         bytes_read = int(bsz * n_kv * win_len * 2 * d_head * 2)
@@ -1101,46 +1343,74 @@ class StoikovKVCache(DynamicCache):
                 v_heads.append(torch.cat([hv, local_v[:, h_idx]], dim=-2))
 
             elif st.role == ROLE_DIFFUSE_LEXICO:
-                if (
-                    st.lex_recon_k is None
-                    or st.lex_recon_atoms != m_atoms
-                    or st.lex_recon_len != hist_len
-                ):
+                if self.cache_lexico_reconstructions:
+                    if (
+                        st.lex_recon_k is None
+                        or st.lex_recon_atoms != m_atoms
+                        or st.lex_recon_len != hist_len
+                    ):
+                        if st.lex_k_idx is not None and st.lex_k_val is not None:
+                            st.lex_recon_k = self.codec.decode(
+                                st.lex_k_idx[..., :m_atoms],
+                                st.lex_k_val[..., :m_atoms],
+                                layer_idx=layer_idx,
+                                check_bounds=False,
+                            ).to(dtype=dtype)
+                            st.lex_recon_k = self._rope_rotate(
+                                st.lex_recon_k,
+                                torch.arange(st.lex_recon_k.shape[-2], device=st.lex_recon_k.device),
+                                inverse=False,
+                            )
+                            st.lex_recon_v = self.codec.decode(
+                                st.lex_v_idx[..., :m_atoms],
+                                st.lex_v_val[..., :m_atoms],
+                                layer_idx=layer_idx,
+                                check_bounds=False,
+                            ).to(dtype=dtype)
+                            st.lex_recon_atoms = m_atoms
+                            st.lex_recon_len = int(st.lex_recon_k.shape[-2])
+                        else:
+                            st.lex_recon_k = torch.empty((bsz, 0, d_head), dtype=dtype, device=device)
+                            st.lex_recon_v = torch.empty((bsz, 0, d_head), dtype=dtype, device=device)
+                            st.lex_recon_atoms = m_atoms
+                            st.lex_recon_len = 0
+                    rk, rv = st.lex_recon_k, st.lex_recon_v
+                    recon_len = st.lex_recon_len
+                else:
                     if st.lex_k_idx is not None and st.lex_k_val is not None:
-                        st.lex_recon_k = self.codec.decode(
+                        rk = self.codec.decode(
                             st.lex_k_idx[..., :m_atoms],
                             st.lex_k_val[..., :m_atoms],
                             layer_idx=layer_idx,
+                            check_bounds=False,
                         ).to(dtype=dtype)
-                        # Lexico history is stored contiguously for absolute positions 0..n-1
-                        st.lex_recon_k = self._rope_rotate(
-                            st.lex_recon_k,
-                            torch.arange(st.lex_recon_k.shape[-2], device=st.lex_recon_k.device),
+                        rk = self._rope_rotate(
+                            rk,
+                            torch.arange(rk.shape[-2], device=rk.device),
                             inverse=False,
                         )
-                        st.lex_recon_v = self.codec.decode(
+                        rv = self.codec.decode(
                             st.lex_v_idx[..., :m_atoms],
                             st.lex_v_val[..., :m_atoms],
                             layer_idx=layer_idx,
+                            check_bounds=False,
                         ).to(dtype=dtype)
-                        st.lex_recon_atoms = m_atoms
-                        st.lex_recon_len = int(st.lex_recon_k.shape[-2])
+                        recon_len = int(rk.shape[-2])
                     else:
-                        st.lex_recon_k = torch.empty((bsz, 0, d_head), dtype=dtype, device=device)
-                        st.lex_recon_v = torch.empty((bsz, 0, d_head), dtype=dtype, device=device)
-                        st.lex_recon_atoms = m_atoms
-                        st.lex_recon_len = 0
+                        rk = torch.empty((bsz, 0, d_head), dtype=dtype, device=device)
+                        rv = torch.empty((bsz, 0, d_head), dtype=dtype, device=device)
+                        recon_len = 0
 
                 # Each vector reads `3 * m_atoms + 2` bytes for K and `3 * m_atoms + 2` bytes for V
-                bytes_read += int(bsz * st.lex_recon_len * 2 * (3 * m_atoms + 2))
-                k_heads.append(torch.cat([st.lex_recon_k, local_k[:, h_idx]], dim=-2))
-                v_heads.append(torch.cat([st.lex_recon_v, local_v[:, h_idx]], dim=-2))
+                bytes_read += int(bsz * recon_len * 2 * (3 * m_atoms + 2))
+                k_heads.append(torch.cat([rk, local_k[:, h_idx]], dim=-2))
+                v_heads.append(torch.cat([rv, local_v[:, h_idx]], dim=-2))
 
             elif st.role == ROLE_PEAKED_H2O:
                 # Place kept heavy hitters at their valid positions; fill evicted slots with an
-                # anti-aligned key vector (-30.0 * U_Q[:, 0]) and zero value vector so evicted slots
-                # have exp(q @ K_evicted^T / sqrt(d)) ~ 0 in SDPA without needing a 4D mask
-                anti_k = (-30.0 * self.U_Q[layer_idx, h_idx, :, 0]).to(dtype=dtype, device=device)
+                # anti-aligned key vector (-30.0 * U_Q[:, anti_col]) and zero value vector
+                anti_col = 0 if self._is_hf_model else -1
+                anti_k = (-30.0 * self.U_Q[layer_idx, h_idx, :, anti_col]).to(dtype=dtype, device=device)
                 hk_pad = anti_k.view(1, 1, d_head).expand(bsz, hist_len, d_head).clone()
                 hv_pad = torch.zeros((bsz, hist_len, d_head), dtype=dtype, device=device)
                 if st.h2o_k is not None and st.h2o_indices is not None and st.h2o_k.shape[-2] > 0:
@@ -1163,16 +1433,25 @@ class StoikovKVCache(DynamicCache):
         if total_seq == 0 or self._local_k[0] is None:
             self.fp16_bytes = 0
             self.compressed_bytes = 0
+            self.physical_resident_bytes = 0
+            self.raw_tensor_bytes = 0
+            self.raw_fp16_tensor_bytes = 0
             self.bytes_read_last_step = 0
             for k in self.per_tier_token_counts:
                 self.per_tier_token_counts[k] = 0
             return
 
         bsz = int(self._local_k[0].shape[0])
+        elem_sz = int(self._local_k[0].element_size())
         vec_fp16_bytes = 2 * self.head_dim * 2  # K and V in FP16: 2 * d_head * 2 bytes
         self.fp16_bytes = int(bsz * self.num_layers * self.num_kv_heads * total_seq * vec_fp16_bytes)
+        self.raw_fp16_tensor_bytes = int(
+            bsz * self.num_layers * self.num_kv_heads * total_seq * 2 * self.head_dim * elem_sz
+        )
 
         comp_bytes = 0
+        phys_fp16_equiv_bytes = 0
+        raw_bytes = 0
         cnt_local = 0
         cnt_ret = 0
         cnt_h2o = 0
@@ -1181,32 +1460,89 @@ class StoikovKVCache(DynamicCache):
 
         for l_idx in range(self.num_layers):
             lk = self._local_k[l_idx]
-            if lk is None:
+            lv = self._local_v[l_idx]
+            if lk is None or lv is None:
                 continue
             win_len = int(lk.shape[-2])
             hist_len = max(0, self._layer_seq_len[l_idx] - win_len)
 
             # Local FP16 window bytes across all KV heads
-            comp_bytes += int(bsz * self.num_kv_heads * win_len * vec_fp16_bytes)
+            local_b = int(bsz * self.num_kv_heads * win_len * vec_fp16_bytes)
+            comp_bytes += local_b
+            phys_fp16_equiv_bytes += local_b
+            raw_bytes += int(lk.numel() * lk.element_size() + lv.numel() * lv.element_size())
             cnt_local += int(bsz * self.num_kv_heads * win_len)
 
             for h_idx in range(self.num_kv_heads):
                 st = self._tiers[l_idx][h_idx]
                 if st.role == ROLE_RETRIEVAL_FP16:
                     n_t = int(st.fp16_k.shape[-2]) if st.fp16_k is not None else 0
-                    comp_bytes += int(bsz * n_t * vec_fp16_bytes)
+                    b_tier = int(bsz * n_t * vec_fp16_bytes)
+                    comp_bytes += b_tier
+                    phys_fp16_equiv_bytes += b_tier
+                    if st.fp16_k is not None and st.fp16_v is not None:
+                        raw_bytes += int(
+                            st.fp16_k.numel() * st.fp16_k.element_size()
+                            + st.fp16_v.numel() * st.fp16_v.element_size()
+                        )
                     cnt_ret += int(bsz * n_t)
                 elif st.role == ROLE_PEAKED_H2O:
                     n_t = int(st.h2o_k.shape[-2]) if st.h2o_k is not None else 0
-                    # Each kept H2O token stores K (FP16), V (FP16), and 1 int32/FP16 score/pos metadata (4 bytes)
-                    comp_bytes += int(bsz * n_t * vec_fp16_bytes)
+                    b_tier = int(bsz * n_t * vec_fp16_bytes)
+                    comp_bytes += b_tier
+                    phys_fp16_equiv_bytes += b_tier
+                    if st.h2o_k is not None and st.h2o_v is not None:
+                        raw_bytes += int(
+                            st.h2o_k.numel() * st.h2o_k.element_size()
+                            + st.h2o_v.numel() * st.h2o_v.element_size()
+                        )
                     cnt_h2o += int(bsz * n_t)
                     cnt_evicted += int(bsz * max(0, hist_len - n_t))
                 elif st.role == ROLE_DIFFUSE_LEXICO:
                     n_t = int(st.lex_k_idx.shape[-2]) if st.lex_k_idx is not None else 0
                     # Each K and V vector in Lexico format uses (3 * s_budget + 2) bytes
-                    comp_bytes += int(bsz * n_t * 2 * (3 * self.s_budget + 2))
+                    b_tier = int(bsz * n_t * 2 * (3 * self.s_budget + 2))
+                    comp_bytes += b_tier
+                    phys_fp16_equiv_bytes += b_tier
+                    if st.lex_k_idx is not None and st.lex_k_val is not None:
+                        raw_k = torch.Tensor._make_subclass(torch.Tensor, st.lex_k_val)
+                        raw_v = torch.Tensor._make_subclass(torch.Tensor, st.lex_v_val)
+                        raw_bytes += int(
+                            st.lex_k_idx.numel() * st.lex_k_idx.element_size()
+                            + st.lex_v_idx.numel() * st.lex_v_idx.element_size()
+                            + raw_k.numel() * raw_k.element_size()
+                            + raw_v.numel() * raw_v.element_size()
+                            + st.lex_k_val.scale.numel() * st.lex_k_val.scale.element_size()
+                            + st.lex_v_val.scale.numel() * st.lex_v_val.scale.element_size()
+                        )
+                    if st.lex_recon_k is not None and st.lex_recon_v is not None:
+                        phys_fp16_equiv_bytes += int(
+                            st.lex_recon_k.numel() * 2 + st.lex_recon_v.numel() * 2
+                        )
+                        raw_bytes += int(
+                            st.lex_recon_k.numel() * st.lex_recon_k.element_size()
+                            + st.lex_recon_v.numel() * st.lex_recon_v.element_size()
+                        )
                     cnt_lex += int(bsz * n_t)
+
+        # Include any duplicate buffers if present in key_cache / value_cache / layers
+        for t in self.key_cache:
+            if isinstance(t, torch.Tensor) and t.numel() > 0:
+                phys_fp16_equiv_bytes += int(t.numel() * 2)
+                raw_bytes += int(t.numel() * t.element_size())
+        for t in self.value_cache:
+            if isinstance(t, torch.Tensor) and t.numel() > 0:
+                phys_fp16_equiv_bytes += int(t.numel() * 2)
+                raw_bytes += int(t.numel() * t.element_size())
+        for layer_obj in getattr(self, "layers", []):
+            k_t = getattr(layer_obj, "keys", None)
+            v_t = getattr(layer_obj, "values", None)
+            if isinstance(k_t, torch.Tensor) and k_t.numel() > 0:
+                phys_fp16_equiv_bytes += int(k_t.numel() * 2)
+                raw_bytes += int(k_t.numel() * k_t.element_size())
+            if isinstance(v_t, torch.Tensor) and v_t.numel() > 0:
+                phys_fp16_equiv_bytes += int(v_t.numel() * 2)
+                raw_bytes += int(v_t.numel() * v_t.element_size())
 
         # Shared Lexico model overhead (NOT included in `compressed_bytes`; reported separately).
         # D [L, d, N] is read at decode time and W_ridge [L, N, d] at encode time. Both are
@@ -1233,6 +1569,8 @@ class StoikovKVCache(DynamicCache):
             self.dictionary_bytes = 0
 
         self.compressed_bytes = comp_bytes
+        self.physical_resident_bytes = phys_fp16_equiv_bytes
+        self.raw_tensor_bytes = raw_bytes
         self.bytes_read_last_step = int(sum(self._layer_bytes_read))
         self.per_tier_token_counts = {
             "local_window_fp16": cnt_local,
@@ -1320,21 +1658,24 @@ class StoikovKVCache(DynamicCache):
             self._local_scores[layer_idx] = cat_sc
             self._local_positions[layer_idx] = cat_pos
 
-        # 4. Materialize rectangular KV states for SDPA / FlashAttention
-        k_out, v_out, bytes_read = self._materialize_layer_kv(
-            layer_idx=layer_idx, dtype=key_states.dtype, device=key_states.device
-        )
-        while len(self.key_cache) <= layer_idx:
-            self.key_cache.append(torch.empty(0, device=key_states.device, dtype=key_states.dtype))
-            self.value_cache.append(torch.empty(0, device=value_states.device, dtype=value_states.dtype))
-        self.key_cache[layer_idx] = k_out
-        self.value_cache[layer_idx] = v_out
+        # 4. Materialize transient rectangular KV states for this layer's SDPA / FlashAttention call
+        # without retaining full-sequence copies in self.key_cache, self.value_cache, or DynamicCache.layers.
+        # During the initial bulk prefill (start_pos == 0 and q_len > 1), use the exact incoming
+        # (key_states, value_states) for intra-prompt hidden-state propagation across layers while
+        # storing only the compressed/evicted tiers in self._tiers for all subsequent decode/verify steps.
+        if self._is_hf_model and start_pos == 0 and q_len > 1:
+            _, _, bytes_read = self._materialize_layer_kv(
+                layer_idx=layer_idx, dtype=key_states.dtype, device=key_states.device, q_len=1
+            )
+            self._layer_bytes_read[layer_idx] = bytes_read
+            self.cumulative_bytes_read += bytes_read
+            if layer_idx == self.num_layers - 1:
+                self._refresh_telemetry()
+            return key_states, value_states
 
-        # Call parent's update with original key_states/value_states to update HF DynamicCache's
-        # internal DynamicLayer state (get_seq_length, get_mask_sizes)
-        # This must be called with the original incremental key_states/value_states,
-        # not the materialized full k_out/v_out
-        super().update(key_states, value_states, layer_idx)
+        k_out, v_out, bytes_read = self._materialize_layer_kv(
+            layer_idx=layer_idx, dtype=key_states.dtype, device=key_states.device, q_len=q_len
+        )
 
         self._layer_bytes_read[layer_idx] = bytes_read
         self.cumulative_bytes_read += bytes_read
@@ -1460,6 +1801,11 @@ class StoikovKVCache(DynamicCache):
             if self.fp16_bytes > 0
             else 1.0
         )
+        phys_ratio = (
+            float(self.physical_resident_bytes) / float(self.fp16_bytes)
+            if self.fp16_bytes > 0
+            else 1.0
+        )
         return {
             "seq_length": self.get_seq_length(0),
             "policy_mode": self.policy_mode,
@@ -1469,7 +1815,11 @@ class StoikovKVCache(DynamicCache):
             "n_b": self.n_b,
             "fp16_bytes": self.fp16_bytes,
             "compressed_bytes": self.compressed_bytes,
+            "physical_resident_bytes": self.physical_resident_bytes,
+            "raw_tensor_bytes": int(getattr(self, "raw_tensor_bytes", 0)),
+            "raw_fp16_tensor_bytes": int(getattr(self, "raw_fp16_tensor_bytes", 0)),
             "memory_ratio_vs_fp16": ratio,
+            "physical_memory_ratio_vs_fp16": phys_ratio,
             "memory_savings_pct": (1.0 - ratio) * 100.0,
             "dictionary_bytes": int(getattr(self, "dictionary_bytes", 0)),
             "memory_ratio_incl_dictionary": (

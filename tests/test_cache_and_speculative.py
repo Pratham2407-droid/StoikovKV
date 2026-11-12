@@ -175,6 +175,180 @@ class TestPerson2LiveInference(unittest.TestCase):
             self.assertIsNotNone(tier.h2o_indices)
             self.assertLessEqual(int(tier.h2o_k.shape[-2]), max(1, int(24 * 0.25)))
 
+    def test_06_p0_physical_memory_compaction_and_no_duplicates(self) -> None:
+        """Verifies P0 physical memory compaction: no duplicate key_cache/layers/lex_recon and compact H2O decode."""
+        cache = StoikovKVCache(
+            model=self.model,
+            artifacts=self.artifacts,
+            n_b=8,
+            keep_ratio=0.25,
+            s_budget=4,
+            policy_mode="hybrid",
+        )
+        input_ids = torch.randint(4, 250, (1, 64), device=self.device)
+        _ = self.model(input_ids=input_ids, past_key_values=cache, use_cache=True, output_attentions=False)
+
+        # Duplicate caches must be completely empty
+        self.assertEqual(len(cache.key_cache), 0)
+        self.assertEqual(len(cache.value_cache), 0)
+        self.assertEqual(len(getattr(cache, "layers", [])), 0)
+
+        # Lexico heads must not retain uncompressed FP16 reconstructions by default
+        for l_idx in range(cache.num_layers):
+            roles_l = cache.head_roles[l_idx]
+            has_h2o = bool((roles_l == ROLE_PEAKED_H2O).any().item())
+            all_h2o = bool((roles_l == ROLE_PEAKED_H2O).all().item())
+            # Every layer containing an H2O head must be 100% pure H2O so anti_k is never needed
+            self.assertEqual(has_h2o, all_h2o)
+            for h_idx in range(cache.num_kv_heads):
+                st = cache._tiers[l_idx][h_idx]
+                if st.role == ROLE_DIFFUSE_LEXICO:
+                    self.assertIsNone(st.lex_recon_k)
+                    self.assertIsNone(st.lex_recon_v)
+
+        # Physical resident bytes must equal logical compressed bytes and be strictly below FP16
+        self.assertEqual(cache.physical_resident_bytes, cache.compressed_bytes)
+        self.assertLess(cache.physical_resident_bytes, cache.fp16_bytes)
+        self.assertLess(cache.raw_tensor_bytes, cache.raw_fp16_tensor_bytes)
+
+        # Standalone H2O layer materializes compact [B, H_kv, k_kept + win_len, D] during decode
+        h2o_cache = StoikovKVCache(
+            model=self.model,
+            artifacts=self.artifacts,
+            n_b=8,
+            keep_ratio=0.25,
+            s_budget=4,
+            policy_mode="standalone_h2o",
+        )
+        _ = self.model(input_ids=input_ids, past_key_values=h2o_cache, use_cache=True, output_attentions=False)
+        k_compact, v_compact, _ = h2o_cache._materialize_layer_kv(
+            0, dtype=self.dtype, device=torch.device(self.device), q_len=1
+        )
+        self.assertLess(int(k_compact.shape[-2]), h2o_cache.get_seq_length(0))
+        self.assertEqual(int(k_compact.shape[-2]), int(v_compact.shape[-2]))
+
+    def test_07_p1_native_generate_drop_in_compatibility(self) -> None:
+        """Verifies P1 native model.generate(past_key_values=cache) and HF Cache API."""
+        cache = StoikovKVCache(
+            model=self.model,
+            artifacts=self.artifacts,
+            n_b=8,
+            keep_ratio=0.25,
+            s_budget=4,
+            policy_mode="hybrid",
+        )
+        self.assertFalse(cache.is_initialized)
+        self.assertEqual(len(cache), 0)
+
+        input_ids = torch.randint(4, 250, (1, 24), device=self.device)
+        out_ids = self.model.generate(
+            input_ids=input_ids,
+            max_new_tokens=6,
+            do_sample=False,
+            past_key_values=cache,
+            use_cache=True,
+        )
+        self.assertEqual(tuple(out_ids.shape), (1, 30))
+        self.assertTrue(cache.is_initialized)
+        self.assertEqual(len(cache), self.config.num_hidden_layers)
+        self.assertEqual(cache.batch_size, 1)
+        self.assertEqual(cache.get_seq_length(0), 29)
+        self.assertEqual(cache.get_mask_sizes(1, 0), (30, 0))
+
+        cache.reset()
+        self.assertFalse(cache.is_initialized)
+        self.assertEqual(cache.get_seq_length(0), 0)
+
+    def test_08_p3_single_pass_verification_and_strict_sampling(self) -> None:
+        """Verifies P3 single-pass cur_gamma+1 verification with bonus token and strict rejection sampling."""
+        cache = StoikovKVCache(
+            model=self.model,
+            artifacts=self.artifacts,
+            n_b=16,
+            keep_ratio=0.25,
+            s_budget=8,
+            policy_mode="hybrid",
+        )
+        prompt_ids = torch.randint(4, 250, (1, 32), device=self.device)
+        res = matryoshka_speculative_generate(
+            model=self.model,
+            tokenizer=self.tokenizer,
+            prompt=prompt_ids,
+            cache=cache,
+            gamma_spec=4,
+            draft_atoms=4,
+            verify_atoms=8,
+            max_new_tokens=10,
+            strict_rejection_sampling=True,
+            do_sample=False,
+        )
+        self.assertEqual(len(res["generated_ids"]), 10)
+        self.assertEqual(cache.get_seq_length(0), 32 + 10)
+
+        res_stoch = matryoshka_speculative_generate(
+            model=self.model,
+            tokenizer=self.tokenizer,
+            prompt=prompt_ids,
+            cache=cache,
+            gamma_spec=4,
+            draft_atoms=4,
+            verify_atoms=8,
+            max_new_tokens=10,
+            strict_rejection_sampling=True,
+            do_sample=True,
+            temperature=0.7,
+        )
+        self.assertEqual(len(res_stoch["generated_ids"]), 10)
+        self.assertEqual(cache.get_seq_length(0), 32 + 10)
+        self.assertIn("analytical_subvector_kv_bytes_per_token", res_stoch)
+        self.assertIn("measured_py_decode_bytes_per_token", res_stoch)
+
+    def test_09_p4_openai_server_and_cli(self) -> None:
+        """Verifies P4 StoikovInferenceEngine OpenAI routes and CLI entrypoint."""
+        from stoikov_kv.cli import main as cli_main
+        from stoikov_kv.server import StoikovInferenceEngine
+
+        engine = StoikovInferenceEngine(
+            model=self.model,
+            tokenizer=self.tokenizer,
+            artifacts=self.artifacts,
+            model_id="test-stoikov-model",
+            n_b=8,
+            keep_ratio=0.25,
+            s_budget=4,
+            draft_atoms=2,
+            gamma_spec=3,
+        )
+
+        st_health, health = engine.handle_request("GET", "/health")
+        self.assertEqual(st_health, 200)
+        self.assertEqual(health["status"], "ok")
+
+        st_models, models = engine.handle_request("GET", "/v1/models")
+        self.assertEqual(st_models, 200)
+        self.assertEqual(models["data"][0]["id"], "test-stoikov-model")
+
+        st_chat, chat = engine.handle_request(
+            "POST",
+            "/v1/chat/completions",
+            {
+                "messages": [{"role": "user", "content": "Hello world test prompt"}],
+                "max_tokens": 6,
+                "speculative": True,
+            },
+        )
+        self.assertEqual(st_chat, 200)
+        self.assertEqual(chat["object"], "chat.completion")
+        self.assertIn("stoikov_telemetry", chat)
+        self.assertLess(
+            chat["stoikov_telemetry"]["physical_resident_bytes"],
+            chat["stoikov_telemetry"]["fp16_bytes"] + 1,
+        )
+
+        st_tel, tel = engine.handle_request("GET", "/v1/telemetry")
+        self.assertEqual(st_tel, 200)
+        self.assertIn("physical_resident_bytes", tel["data"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -966,7 +966,7 @@ Answers:""",
         target_tokens = 1024
         
         # Use calibration prompts to get KV states
-        from benchmarks.bench_person1 import (
+        from benchmarks.bench_calibration_codec import (
             ENGLISH_EVAL_PROMPTS, PYTHON_EVAL_PROMPTS,
             _collect_domain_kv_states
         )
