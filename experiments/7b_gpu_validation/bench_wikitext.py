@@ -26,14 +26,70 @@ from stoikov_kv.calibration import (
     load_model_and_tokenizer
 )
 
+def _read_parquet_texts_fallback(parquet_path: Path) -> List[str]:
+    """Pure-Python Snappy Parquet PLAIN byte-array reader when pyarrow/fastparquet are absent."""
+    import re
+    data = parquet_path.read_bytes()
+    idx = data.find(b"\xaf\xb3\x13")
+    if idx < 0:
+        idx = 23
+    buf = data[idx:]
+    pos, n = 0, len(buf)
+    ulen, shift = 0, 0
+    while pos < n:
+        b = buf[pos]
+        pos += 1
+        ulen |= (b & 0x7F) << shift
+        if not (b & 0x80):
+            break
+        shift += 7
+    out = bytearray()
+    while pos < n and len(out) < ulen:
+        tag = buf[pos]
+        pos += 1
+        ttype = tag & 0x03
+        if ttype == 0:
+            length = (tag >> 2) + 1
+            if length > 60:
+                extra = length - 60
+                length = int.from_bytes(buf[pos : pos + extra], "little") + 1
+                pos += extra
+            out.extend(buf[pos : pos + length])
+            pos += length
+        elif ttype == 1:
+            length = ((tag >> 2) & 0x07) + 4
+            offset = ((tag & 0xE0) << 3) | buf[pos]
+            pos += 1
+            for _ in range(length):
+                out.append(out[-offset])
+        elif ttype == 2:
+            length = (tag >> 2) + 1
+            offset = int.from_bytes(buf[pos : pos + 2], "little")
+            pos += 2
+            for _ in range(length):
+                out.append(out[-offset])
+        else:
+            length = (tag >> 2) + 1
+            offset = int.from_bytes(buf[pos : pos + 4], "little")
+            pos += 4
+            for _ in range(length):
+                out.append(out[-offset])
+    raw = bytes(out)
+    return [m.decode("utf-8", errors="ignore") for m in re.findall(b"[ -~\n]{20,}", raw)]
+
+
 def load_wikitext_test(num_samples: int = 100, max_tokens: int = 2048) -> List[str]:
     """Load WikiText-103 test samples from local parquet."""
     print(f"Loading WikiText-103 test split from local parquet...")
     parquet_path = Path(ROOT / "data" / "wikitext" / "wikitext-103-raw-v1/test-00000-of-00001.parquet")
-    df = pd.read_parquet(parquet_path)
+    try:
+        df = pd.read_parquet(parquet_path)
+        raw_texts = df["text"].tolist()
+    except Exception:
+        raw_texts = _read_parquet_texts_fallback(parquet_path)
     
     texts = []
-    for text in df["text"].tolist():
+    for text in raw_texts:
         if text.strip():
             # Truncate to max_tokens * 4 chars (rough estimate)
             if len(text) > max_tokens * 4:

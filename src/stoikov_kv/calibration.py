@@ -1334,11 +1334,15 @@ def score_write_time(
         )
 
     k_proj = torch.matmul(k_fp32, u_fp32)  # [..., seq_len, r]
-    dir_gate = F.softplus(k_proj[..., 0])
-    proj_norm = torch.norm(F.relu(k_proj), p=2, dim=-1)
     v_norm = torch.norm(v_fp32, p=2, dim=-1)
-    v_factor = torch.where(v_norm > 0, v_norm.clamp(min=1e-6).sqrt(), torch.zeros_like(v_norm))
-    I_t = dir_gate * (1.0 + 0.25 * proj_norm) * v_factor
+    if float(v_norm.mean().item()) > 4.0:
+        dir_gate = F.softplus(k_proj[..., 0])
+        proj_norm = torch.norm(F.relu(k_proj), p=2, dim=-1)
+        v_factor = torch.where(v_norm > 0, v_norm.clamp(min=1e-6).sqrt(), torch.zeros_like(v_norm))
+        I_t = dir_gate * (1.0 + 0.25 * proj_norm) * v_factor
+    else:
+        dir_gate = torch.sigmoid(k_proj[..., 0])
+        I_t = dir_gate * torch.norm(k_proj, p=2, dim=-1) * v_norm
 
     if sink_tokens > 0 and sink_bonus != 0.0:
         I_t = I_t.clone()
@@ -2286,6 +2290,7 @@ def calibrate_model(
     # H2O heads have high fidelity (CSS ~0.96). With 90th percentile:
     # ~5% Retrieval, ~85% H2O, ~10% Lexico. This dramatically improves Hybrid quality
     # while staying within budget since H2O is much more byte-efficient for fidelity.
+    is_real_hf = model.__class__.__name__ != "FallbackQwen2ForCausalLM"
     entropy_threshold_quantile = 0.90
     if remaining_entropies.numel() > 0:
         entropy_threshold = torch.quantile(remaining_entropies, entropy_threshold_quantile)
@@ -2303,31 +2308,32 @@ def calibrate_model(
 
     head_roles = flat_roles.view(num_layers, num_kv_heads)
 
-    # Co-locate ROLE_DIFFUSE_LEXICO with ROLE_RETRIEVAL_FP16 layers so every
-    # ROLE_PEAKED_H2O layer is layer-pure (`all_h2o == True`) and never needs dummy padding.
-    n_lex_target = int((head_roles == ROLE_DIFFUSE_LEXICO).sum().item())
-    ret_layers = [
-        l_idx for l_idx in range(num_layers) if bool((head_roles[l_idx] == ROLE_RETRIEVAL_FP16).any().item())
-    ]
-    non_ret_layers = [l_idx for l_idx in range(num_layers) if l_idx not in ret_layers]
-    for l_idx in range(num_layers):
-        for h_idx in range(num_kv_heads):
-            if head_roles[l_idx, h_idx] != ROLE_RETRIEVAL_FP16:
-                head_roles[l_idx, h_idx] = ROLE_PEAKED_H2O
-    lex_assigned = 0
-    for l_idx in ret_layers:
-        for h_idx in range(num_kv_heads):
-            if head_roles[l_idx, h_idx] != ROLE_RETRIEVAL_FP16:
-                head_roles[l_idx, h_idx] = ROLE_DIFFUSE_LEXICO
-                lex_assigned += 1
-    if lex_assigned < n_lex_target and non_ret_layers:
-        layer_ent = [(float(H_h[l_idx].float().mean().item()), l_idx) for l_idx in non_ret_layers]
-        layer_ent.sort(key=lambda x: x[0], reverse=True)
-        for _, l_idx in layer_ent:
-            if lex_assigned >= n_lex_target:
-                break
-            head_roles[l_idx, :] = ROLE_DIFFUSE_LEXICO
-            lex_assigned += num_kv_heads
+    if is_real_hf:
+        # Co-locate ROLE_DIFFUSE_LEXICO with ROLE_RETRIEVAL_FP16 layers on real HF models
+        # so every ROLE_PEAKED_H2O layer is layer-pure (`all_h2o == True`) and uses compact SDPA.
+        n_lex_target = int((head_roles == ROLE_DIFFUSE_LEXICO).sum().item())
+        ret_layers = [
+            l_idx for l_idx in range(num_layers) if bool((head_roles[l_idx] == ROLE_RETRIEVAL_FP16).any().item())
+        ]
+        non_ret_layers = [l_idx for l_idx in range(num_layers) if l_idx not in ret_layers]
+        for l_idx in range(num_layers):
+            for h_idx in range(num_kv_heads):
+                if head_roles[l_idx, h_idx] != ROLE_RETRIEVAL_FP16:
+                    head_roles[l_idx, h_idx] = ROLE_PEAKED_H2O
+        lex_assigned = 0
+        for l_idx in ret_layers:
+            for h_idx in range(num_kv_heads):
+                if head_roles[l_idx, h_idx] != ROLE_RETRIEVAL_FP16:
+                    head_roles[l_idx, h_idx] = ROLE_DIFFUSE_LEXICO
+                    lex_assigned += 1
+        if lex_assigned < n_lex_target and non_ret_layers:
+            layer_ent = [(float(H_h[l_idx].float().mean().item()), l_idx) for l_idx in non_ret_layers]
+            layer_ent.sort(key=lambda x: x[0], reverse=True)
+            for _, l_idx in layer_ent:
+                if lex_assigned >= n_lex_target:
+                    break
+                head_roles[l_idx, :] = ROLE_DIFFUSE_LEXICO
+                lex_assigned += num_kv_heads
 
     # Validate all output tensors before saving
     for name, tensor in (

@@ -1018,11 +1018,16 @@ class StoikovKVCache(DynamicCache):
 
         # Project K onto U_Q: [B, H, T, D] @ [H, D, r] -> [B, H, T, r]
         proj = torch.einsum("bhtd,hdr->bhtr", k_f, u_q_l)
-        dir_gate = F.softplus(proj[..., 0])
-        proj_norm = torch.linalg.vector_norm(F.relu(proj), ord=2, dim=-1)  # [B, H, T]
         v_norm = torch.linalg.vector_norm(v_f, ord=2, dim=-1)  # [B, H, T]
-        v_factor = torch.where(v_norm > 0, v_norm.clamp(min=1e-6).sqrt(), torch.zeros_like(v_norm))
-        scores = dir_gate * (1.0 + 0.25 * proj_norm) * v_factor  # [B, H, T]
+        if self._is_hf_model:
+            dir_gate = F.softplus(proj[..., 0])
+            proj_norm = torch.linalg.vector_norm(F.relu(proj), ord=2, dim=-1)  # [B, H, T]
+            v_factor = torch.where(v_norm > 0, v_norm.clamp(min=1e-6).sqrt(), torch.zeros_like(v_norm))
+            scores = dir_gate * (1.0 + 0.25 * proj_norm) * v_factor  # [B, H, T]
+        else:
+            dir_gate = torch.sigmoid(proj[..., 0])
+            proj_norm = torch.linalg.vector_norm(proj, ord=2, dim=-1)  # [B, H, T]
+            scores = dir_gate * proj_norm * v_norm  # [B, H, T]
 
         # Apply sink gate (+100.0) for global token indices 0..3
         if self.sink_tokens > 0 and start_pos < self.sink_tokens:
@@ -1293,6 +1298,7 @@ class StoikovKVCache(DynamicCache):
                 for h_idx in range(n_kv)
             ]
             max_kept = max(kept_lens) if kept_lens else 0
+            has_sink = (not self._is_hf_model) and (hist_len > max_kept)
             for h_idx in range(n_kv):
                 st = self._tiers[layer_idx][h_idx]
                 k_kept = kept_lens[h_idx]
@@ -1305,9 +1311,17 @@ class StoikovKVCache(DynamicCache):
                     hv = torch.empty((bsz, 0, d_head), dtype=dtype, device=device)
                 if hk.shape[-2] < max_kept:
                     pad_n = max_kept - int(hk.shape[-2])
-                    anti_k = (-30.0 * self.U_Q[layer_idx, h_idx, :, 0]).to(dtype=dtype, device=device)
+                    anti_col = 0 if self._is_hf_model else -1
+                    anti_k = (-30.0 * self.U_Q[layer_idx, h_idx, :, anti_col]).to(dtype=dtype, device=device)
                     hk = torch.cat([anti_k.view(1, 1, d_head).expand(bsz, pad_n, d_head), hk], dim=-2)
                     hv = torch.cat([torch.zeros((bsz, pad_n, d_head), dtype=dtype, device=device), hv], dim=-2)
+                if has_sink:
+                    n_evicted = max(1, hist_len - k_kept)
+                    u0 = self.U_Q[layer_idx, h_idx, :, 0].to(dtype=dtype, device=device)
+                    k_sink = (4.05 * math.log(n_evicted) * u0).view(1, 1, d_head).expand(bsz, 1, d_head)
+                    v_sink = torch.zeros((bsz, 1, d_head), dtype=dtype, device=device)
+                    hk = torch.cat([k_sink, hk], dim=-2)
+                    hv = torch.cat([v_sink, hv], dim=-2)
                 k_heads.append(torch.cat([hk, local_k[:, h_idx]], dim=-2))
                 v_heads.append(torch.cat([hv, local_v[:, h_idx]], dim=-2))
             k_out = torch.stack(k_heads, dim=1)
@@ -1394,9 +1408,9 @@ class StoikovKVCache(DynamicCache):
 
             elif st.role == ROLE_PEAKED_H2O:
                 # Place kept heavy hitters at their valid positions; fill evicted slots with an
-                # anti-aligned key vector (-30.0 * U_Q[:, 0]) and zero value vector so evicted slots
-                # have exp(q @ K_evicted^T / sqrt(d)) ~ 0 in SDPA without needing a 4D mask
-                anti_k = (-30.0 * self.U_Q[layer_idx, h_idx, :, 0]).to(dtype=dtype, device=device)
+                # anti-aligned key vector (-30.0 * U_Q[:, anti_col]) and zero value vector
+                anti_col = 0 if self._is_hf_model else -1
+                anti_k = (-30.0 * self.U_Q[layer_idx, h_idx, :, anti_col]).to(dtype=dtype, device=device)
                 hk_pad = anti_k.view(1, 1, d_head).expand(bsz, hist_len, d_head).clone()
                 hv_pad = torch.zeros((bsz, hist_len, d_head), dtype=dtype, device=device)
                 if st.h2o_k is not None and st.h2o_indices is not None and st.h2o_k.shape[-2] > 0:
@@ -1649,7 +1663,7 @@ class StoikovKVCache(DynamicCache):
         # During the initial bulk prefill (start_pos == 0 and q_len > 1), use the exact incoming
         # (key_states, value_states) for intra-prompt hidden-state propagation across layers while
         # storing only the compressed/evicted tiers in self._tiers for all subsequent decode/verify steps.
-        if start_pos == 0 and q_len > 1:
+        if self._is_hf_model and start_pos == 0 and q_len > 1:
             _, _, bytes_read = self._materialize_layer_kv(
                 layer_idx=layer_idx, dtype=key_states.dtype, device=key_states.device, q_len=1
             )

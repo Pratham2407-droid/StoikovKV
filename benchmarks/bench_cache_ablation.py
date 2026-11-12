@@ -907,7 +907,8 @@ def main() -> None:
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float16 if device == "cuda" else torch.float32
-    loaded_pair = load_model_and_tokenizer(device=device, dtype=dtype)
+    use_real = "--real-model" in sys.argv
+    loaded_pair = load_model_and_tokenizer(device=device, dtype=dtype, use_real_model=use_real)
     if isinstance(loaded_pair, tuple) and len(loaded_pair) == 3:
         model, tokenizer, backend_info = loaded_pair
     else:
